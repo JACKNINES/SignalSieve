@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+module CSignalSieveZip {
+    header "CSignalSieveZip.h"
+    link "z"
+    export *
+}

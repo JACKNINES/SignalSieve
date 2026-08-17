@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "name": "Signal Sieve Spectral Carrier Lab (Experimental)",
+  "version": "1.0.0",
+  "executable": "SignalSievePixelSpectral",
+  "capabilities": [
+    "score",
+    "regenerate"
+  ],
+  "license": "MPL-2.0"
+}

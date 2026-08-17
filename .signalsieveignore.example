@@ -1,0 +1,10 @@
+# Copy this file to .signalsieveignore in a project root and adjust it.
+# Blank lines and comments are ignored.
+
+# Security fixtures may intentionally contain invisible payloads.
+/Tests/Fixtures/
+*.security-fixture
+
+# Generated snapshots and vendor output.
+snapshots/**
+vendor/generated/

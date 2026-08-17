@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest a focused privacy, inspection, or cleaning improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What privacy or inspection problem should Signal Sieve solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain the expected result and important safety boundaries.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: References or synthetic examples
+      description: Do not attach private text, URLs, rules, or documents.

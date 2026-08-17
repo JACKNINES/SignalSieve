@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "name": "Signal Sieve LSB Forensics (Experimental)",
+  "version": "1.0.0",
+  "executable": "SignalSievePixelBaseline",
+  "capabilities": [
+    "score",
+    "regenerate"
+  ],
+  "license": "MPL-2.0"
+}

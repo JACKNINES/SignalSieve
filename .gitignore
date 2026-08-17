@@ -1,0 +1,12 @@
+.build/
+.swiftpm/
+.DS_Store
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.app
+*.dmg
+*.log
+.env
+.env.*
+.signalsieveignore
