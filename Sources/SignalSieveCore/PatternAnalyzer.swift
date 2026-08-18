@@ -91,6 +91,7 @@ public enum PatternAnalyzer {
 
     private static func repeatedPhraseFindings(_ samples: [[String]]) -> [PatternFinding] {
         var sampleIndexesByPhrase: [String: Set<Int>] = [:]
+        var firstPositionByPhrase: [String: Int] = [:]
 
         for (sampleIndex, words) in samples.enumerated() {
             guard words.count >= 3 else { continue }
@@ -101,6 +102,9 @@ public enum PatternAnalyzer {
                     let phrase = words[start..<(start + length)].joined(separator: " ")
                     if phrase.count >= 13 && !overlyCommonPhrases.contains(phrase) {
                         phrasesInSample.insert(phrase)
+                        if firstPositionByPhrase[phrase] == nil {
+                            firstPositionByPhrase[phrase] = start
+                        }
                     }
                 }
             }
@@ -112,22 +116,29 @@ public enum PatternAnalyzer {
 
         let candidates = sampleIndexesByPhrase
             .filter { $0.value.count >= 2 }
-            .map { (phrase: $0.key, indexes: $0.value) }
+            .map {
+                (
+                    phrase: $0.key,
+                    indexes: $0.value,
+                    firstPosition: firstPositionByPhrase[$0.key] ?? .max
+                )
+            }
             .sorted {
                 let leftWords = $0.phrase.split(separator: " ").count
                 let rightWords = $1.phrase.split(separator: " ").count
                 if leftWords != rightWords { return leftWords > rightWords }
                 if $0.indexes.count != $1.indexes.count { return $0.indexes.count > $1.indexes.count }
+                if $0.firstPosition != $1.firstPosition { return $0.firstPosition < $1.firstPosition }
                 return $0.phrase < $1.phrase
             }
 
         var selected: [(phrase: String, indexes: Set<Int>)] = []
         for candidate in candidates {
-            let isContained = selected.contains { existing in
-                existing.indexes == candidate.indexes && existing.phrase.contains(candidate.phrase)
+            let alreadyRepresentsSampleSet = selected.contains { existing in
+                existing.indexes == candidate.indexes
             }
-            if !isContained {
-                selected.append(candidate)
+            if !alreadyRepresentsSampleSet {
+                selected.append((candidate.phrase, candidate.indexes))
             }
             if selected.count == 8 { break }
         }

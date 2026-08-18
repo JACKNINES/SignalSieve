@@ -187,6 +187,37 @@ public enum CodeLanguageDetector {
         "json": .json, "yaml": .yaml, "yml": .yaml, "toml": .toml
     ]
 
+    public static func language(forFileExtension fileExtension: String) -> CodeLanguage? {
+        switch fileExtension.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")) {
+        case "swift": .swift
+        case "ts", "tsx": .typescript
+        case "js", "jsx", "mjs", "cjs": .javascript
+        case "rs": .rust
+        case "py": .python
+        case "c", "h": .c
+        case "cc", "cpp", "cxx", "hpp": .cpp
+        case "m", "mm": .objectiveC
+        case "go": .go
+        case "java": .java
+        case "kt", "kts": .kotlin
+        case "cs": .cSharp
+        case "sh", "bash", "zsh": .shell
+        case "sql": .sql
+        case "sol": .solidity
+        case "move": .move
+        case "rb": .ruby
+        case "php": .php
+        case "dart": .dart
+        case "lua": .lua
+        case "html", "htm": .html
+        case "css": .css
+        case "json": .json
+        case "yaml", "yml": .yaml
+        case "toml": .toml
+        default: nil
+        }
+    }
+
     public static func detect(_ text: String) -> CodeLanguageDetection {
         let sample = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !sample.isEmpty else {

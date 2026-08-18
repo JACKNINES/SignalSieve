@@ -62,7 +62,7 @@ public enum FindingReportFormatter {
             if let equivalence = binary.probableTextEquivalence {
                 lines.append(field(
                     "Probable detected equivalence",
-                    "\"(visible(equivalence.text))\"",
+                    "\"\(visible(equivalence.text))\"",
                     language
                 ))
                 lines.append(field("Characters", String(equivalence.characterCount), language))

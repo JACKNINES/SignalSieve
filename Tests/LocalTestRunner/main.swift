@@ -117,6 +117,12 @@ enum LocalTestRunner {
             directionalMarks.findings.allSatisfy { $0.kind.riskLevel == .high },
             "A directional mark did not receive high risk"
         )
+
+        let decomposedAccent = HiddenTextAnalyzer.inspect("e\u{0301}")
+        try expect(
+            decomposedAccent.changesUnderNFC && decomposedAccent.changesUnderNFKC,
+            "Scalar-level normalization changes were not detected"
+        )
     }
 
     private static func testPrivateResearchQuery() throws {
@@ -243,6 +249,10 @@ enum LocalTestRunner {
         let report = try VaccineEngine.scan(rootURL: project)
         try expect(report.scannedFileCount == 1 && report.binaryFileCount == 1, "Vaccine scan counts were wrong")
         try expect(report.sanitizableFileCount == 1, "Vaccine missed a sanitizable source file")
+        try expect(
+            report.findings.first?.detectedLanguage == "Swift",
+            "Vaccine did not use a matching source-file extension to resolve language ambiguity"
+        )
 
         var metadataPNG = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
         metadataPNG.append(localPNGChunk("eXIf", payload: Data("private".utf8)))
@@ -402,6 +412,17 @@ enum LocalTestRunner {
         )
         try expect(result.verificationPassed, "Post-neutralization scan still found the signature")
         try expect(result.neutralizedGroupIDs.contains(group.id), "Neutralized signature was not verified")
+
+        let reviewFile = directory.appendingPathComponent("README.txt")
+        try Data("A visible heart may legitimately use a selector: ♥\u{FE0F}\n".utf8)
+            .write(to: reviewFile)
+        let reviewReport = try SignatureHuntEngine.scan(rootURL: directory)
+        try expect(
+            reviewReport.groups.contains {
+                $0.codePoint == "U+FE0F" && $0.disposition == .reviewOnly
+            },
+            "A functional variation selector was not retained as review-only"
+        )
     }
 
     private static func testCodeLanguageDetection() throws {
@@ -522,6 +543,13 @@ enum LocalTestRunner {
             finding.kind == .repeatedPhrase
                 && finding.pattern.contains("privacy tools should remain entirely local")
         }, "Repeated phrase was not detected")
+
+        let duplicate = "transparent local tools protect private text without remote processing"
+        let deduplicated = PatternAnalyzer.analyze([duplicate, duplicate])
+        try expect(
+            deduplicated.findings.filter { $0.kind == .repeatedPhrase }.count == 1,
+            "Overlapping repeated phrase windows were not deduplicated"
+        )
     }
 
     private static func testUnrelatedPatterns() throws {
@@ -1087,6 +1115,11 @@ enum LocalTestRunner {
         try expect(third.containsTrackedLinks, "Active protection missed a tracked link")
         try expect(third.containsRecentPattern, "Active protection missed a three-copy pattern")
         try expect(third.updatedPatternTexts.count == 3, "Active protection lost recent samples")
+        try expect(
+            third.linkCleaning.text
+                == "Privacy tools should remain entirely local and transparent for everyone. Third sample https://example.com?a=keep",
+            "Active protection did not combine safe Unicode and tracker cleaning"
+        )
 
         let medium = HiddenTextAnalyzer.inspect("medium\u{200B}")
         let high = HiddenTextAnalyzer.inspect("high\u{202E}")
@@ -1209,6 +1242,40 @@ enum LocalTestRunner {
         let revealReport = FindingReportFormatter.revealedFragment(revealed, language: .spanish)
         try expect(revealReport.contains("U+200C = 0"), "Reveal report omitted its bit mapping")
         try expect(revealReport.contains("Bits faltantes: 1"), "Reveal report omitted truncation evidence")
+
+        let equivalence = ProbablePayloadEquivalence(
+            text: "u suck",
+            characterCount: 6,
+            unicodeCodePoints: ["U+0075", "U+0020", "U+0073", "U+0075", "U+0063", "U+006B"],
+            bitEditDistance: 4,
+            similarityPercent: 92,
+            confidence: .low
+        )
+        let probable = RevealedInvisibleFragment(
+            id: 1,
+            findingNumber: 2,
+            codePoint: "U+200C",
+            line: 1,
+            column: 39,
+            presentation: .incompletePayload,
+            text: "1110100",
+            hiddenScalarCount: 7,
+            scalarPositions: Array(1...7),
+            zeroWidthBinary: ZeroWidthBinaryDetails(
+                zeroCodePoint: "U+200C",
+                oneCodePoint: "U+200D",
+                bits: "1110100",
+                completeByteCount: 0,
+                trailingBitCount: 7,
+                isPreviewTruncated: false,
+                probableTextEquivalence: equivalence
+            )
+        )
+        let probableReport = FindingReportFormatter.revealedFragment(probable, language: .spanish)
+        try expect(
+            probableReport.contains("Equivalencia probable detectada: \"u suck\""),
+            "Reveal report rendered probable text as a literal interpolation"
+        )
     }
 
     private static func testLocalization() throws {

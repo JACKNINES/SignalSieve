@@ -337,23 +337,36 @@ public enum VaccineEngine {
                 )
             }
             let sanitizable = cleaned.text == text ? 0 : cleaned.removedCount + cleaned.replacedCount
+            let hiddenFindings = inspection.findings
             let unicodeCount = codeAnalysis.isLikelyCode
                 ? codeAnalysis.findings.count
-                : inspection.actionableFindings.count
+                : hiddenFindings.count
             let reviewOnly = max(0, unicodeCount - sanitizable)
                 + (provenanceReport?.findings.count ?? 0)
+
+            let detectedLanguage: String?
+            if codeAnalysis.isLikelyCode,
+               let fileLanguage = CodeLanguageDetector.language(
+                forFileExtension: fileURL.pathExtension
+               ),
+               codeAnalysis.languageDetection.primary == fileLanguage
+                    || codeAnalysis.languageDetection.alternatives.contains(fileLanguage) {
+                detectedLanguage = fileLanguage.rawValue
+            } else {
+                detectedLanguage = codeAnalysis.isLikelyCode ? codeAnalysis.detectedLanguage : nil
+            }
 
             guard unicodeCount > 0 || encoded.isDetected || provenanceReport != nil else { continue }
             findings.append(VaccineFileFinding(
                 fileURL: fileURL,
                 relativePath: relativePath,
-                detectedLanguage: codeAnalysis.isLikelyCode ? codeAnalysis.detectedLanguage : nil,
+                detectedLanguage: detectedLanguage,
                 unicodeFindingCount: unicodeCount,
                 sanitizableFindingCount: sanitizable,
                 reviewOnlyFindingCount: reviewOnly,
                 encodedDataKind: encoded.kind == .rawBinary ? nil : encoded.kind,
                 codeFindings: codeAnalysis.findings,
-                hiddenFindings: inspection.actionableFindings,
+                hiddenFindings: hiddenFindings,
                 revealedFragments: InvisibleFragmentRevealer.reveal(in: text),
                 textEncoding: decodedFile.encoding,
                 hasByteOrderMark: decodedFile.hasByteOrderMark,

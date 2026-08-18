@@ -214,12 +214,14 @@ public enum HiddenTextAnalyzer {
             utf16Position += scalar.utf16.count
         }
 
+        let nfc = text.precomposedStringWithCanonicalMapping
+        let nfkc = text.precomposedStringWithCompatibilityMapping
         return TextInspection(
             scalarCount: scalars.count,
             utf16Count: text.utf16.count,
             findings: findings,
-            changesUnderNFC: text != text.precomposedStringWithCanonicalMapping,
-            changesUnderNFKC: text != text.precomposedStringWithCompatibilityMapping
+            changesUnderNFC: !text.unicodeScalars.elementsEqual(nfc.unicodeScalars),
+            changesUnderNFKC: !text.unicodeScalars.elementsEqual(nfkc.unicodeScalars)
         )
     }
 

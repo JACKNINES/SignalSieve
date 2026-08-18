@@ -23,11 +23,14 @@ jobs:
       - name: Build with warnings as errors
         run: swift build -Xswiftc -warnings-as-errors
 
-      - name: Run unit and integration tests
-        run: swift test
-
       - name: Build pinned PDF dependencies
         run: ./bootstrap-pdf-tools.sh
+
+      - name: Build local PDF cleaning helper
+        run: ./build-local.sh
+
+      - name: Run unit and integration tests
+        run: swift test
 
       - name: Run packaging and restriction quality gate
         run: ./quality-gate.sh

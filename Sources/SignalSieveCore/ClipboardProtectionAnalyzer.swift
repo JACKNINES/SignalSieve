@@ -65,12 +65,16 @@ public enum ClipboardProtectionAnalyzer {
     ) -> ClipboardProtectionAnalysis {
         let sampleUpdate = appendingPatternSample(text, to: recentPatternTexts)
         let recentWindow = Array(sampleUpdate.texts.suffix(alertPatternWindow))
+        let safelyCleanedText = TextCleaner.clean(text, mode: .safe).text
 
         return ClipboardProtectionAnalysis(
             inspection: HiddenTextAnalyzer.inspect(text),
             codeAnalysis: CodeGuardAnalyzer.analyze(text),
             binaryAnalysis: BinaryContentDetector.analyze(text),
-            linkCleaning: URLTrackerCleaner.cleanLinks(in: text, customRules: customRules),
+            linkCleaning: URLTrackerCleaner.cleanLinks(
+                in: safelyCleanedText,
+                customRules: customRules
+            ),
             recentPatternReport: PatternAnalyzer.analyze(recentWindow),
             updatedPatternTexts: sampleUpdate.texts,
             addedPatternSample: sampleUpdate.added

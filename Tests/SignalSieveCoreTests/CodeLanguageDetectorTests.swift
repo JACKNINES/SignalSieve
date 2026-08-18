@@ -2,6 +2,13 @@
 import Testing
 @testable import SignalSieveCore
 
+@Test("Maps source-file extensions without overriding content analysis")
+func mapsSourceFileExtensions() {
+    #expect(CodeLanguageDetector.language(forFileExtension: "swift") == .swift)
+    #expect(CodeLanguageDetector.language(forFileExtension: ".py") == .python)
+    #expect(CodeLanguageDetector.language(forFileExtension: "unknown") == nil)
+}
+
 @Test("Detects distinctive syntax across supported programming languages")
 func detectsProgrammingLanguages() {
     let samples: [(CodeLanguage, String)] = [
