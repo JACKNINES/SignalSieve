@@ -16,7 +16,19 @@ PROJECT_LICENSE="$APP_BUNDLE/Contents/Resources/Licenses/SignalSieve/LICENSE"
 SOURCE_NOTICE="$APP_BUNDLE/Contents/Resources/SOURCE.md"
 TRADEMARK_NOTICE="$APP_BUNDLE/Contents/Resources/TRADEMARKS.md"
 MODULE_CACHE="$PROJECT_ROOT/.build/module-cache"
-TESTING_FRAMEWORKS="$(xcode-select -p)/Library/Developer/Frameworks"
+TESTING_FRAMEWORK_FLAGS=()
+for framework_directory in \
+    "$(xcode-select -p)/Library/Developer/Frameworks" \
+    "$(xcode-select -p)/Platforms/MacOSX.platform/Developer/Library/Frameworks" \
+    "$(xcrun --show-sdk-platform-path 2>/dev/null)/Developer/Library/Frameworks"; do
+    if [[ -d "$framework_directory/Testing.framework" ]]; then
+        TESTING_FRAMEWORK_FLAGS+=(-F "$framework_directory")
+    fi
+done
+if (( ${#TESTING_FRAMEWORK_FLAGS} == 0 )); then
+    print -u2 "Testing.framework not found in any known toolchain layout."
+    exit 1
+fi
 COMPATIBLE_SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk"
 TARGET_ARCH="$(uname -m)"
 
@@ -36,7 +48,7 @@ swiftc \
     -module-cache-path "$MODULE_CACHE" \
     -I "$PROJECT_ROOT/.build/manual" \
     -I "$PROJECT_ROOT/Sources/CSignalSieveZip/include" \
-    -F "$TESTING_FRAMEWORKS" \
+    "${TESTING_FRAMEWORK_FLAGS[@]}" \
     -enable-testing \
     -Xfrontend -disable-cross-import-overlays \
     "$PROJECT_ROOT/Tests/SignalSieveCoreTests"/*.swift
