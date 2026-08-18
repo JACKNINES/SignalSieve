@@ -48,12 +48,12 @@ done
 plutil -lint "$APP_BUNDLE/Contents/Info.plist"
 codesign --verify --deep --strict "$APP_BUNDLE"
 
-if ! otool -L "$EXECUTABLE" | rg --fixed-strings '@rpath/libSignalSieveCore.dylib'; then
+if ! otool -L "$EXECUTABLE" | grep -F '@rpath/libSignalSieveCore.dylib'; then
     print -u2 "Packaged executable does not use the expected private framework path."
     exit 1
 fi
 
-if ! otool -l "$EXECUTABLE" | rg --fixed-strings '@executable_path/../Frameworks'; then
+if ! otool -l "$EXECUTABLE" | grep -F '@executable_path/../Frameworks'; then
     print -u2 "Packaged executable is missing its private Frameworks rpath."
     exit 1
 fi
@@ -72,48 +72,48 @@ if [[ ! -x "$EXECUTABLE" \
     exit 1
 fi
 
-if ! rg --fixed-strings 'Mozilla Public License Version 2.0' "$PROJECT_LICENSE" \
-        || ! rg --fixed-strings 'MPL-2.0' "$SOURCE_NOTICE"; then
+if ! grep -F 'Mozilla Public License Version 2.0' "$PROJECT_LICENSE" \
+        || ! grep -F 'MPL-2.0' "$SOURCE_NOTICE"; then
     print -u2 "Packaged application is missing its MPL source notice."
     exit 1
 fi
 
-if otool -L "$PDF_SANITIZER" | rg --fixed-strings '/opt/homebrew'; then
+if otool -L "$PDF_SANITIZER" | grep -F '/opt/homebrew'; then
     print -u2 "Bundled PDF sanitizer has an unexpected Homebrew runtime dependency."
     exit 1
 fi
-if ! vtool -show-build "$PDF_SANITIZER" | rg --fixed-strings 'minos 13.0'; then
+if ! vtool -show-build "$PDF_SANITIZER" | grep -F 'minos 13.0'; then
     print -u2 "Bundled PDF sanitizer does not preserve the macOS 13 deployment target."
     exit 1
 fi
 
-if ! otool -L "$PIXEL_MODULE" | rg --fixed-strings '@rpath/libSignalSieveCore.dylib'; then
+if ! otool -L "$PIXEL_MODULE" | grep -F '@rpath/libSignalSieveCore.dylib'; then
     print -u2 "Bundled pixel baseline does not use the private core framework."
     exit 1
 fi
 
-if ! otool -l "$PIXEL_MODULE" | rg --fixed-strings '@executable_path/../../../Frameworks'; then
+if ! otool -l "$PIXEL_MODULE" | grep -F '@executable_path/../../../Frameworks'; then
     print -u2 "Bundled pixel baseline is missing its packaged Frameworks rpath."
     exit 1
 fi
 
-if ! otool -L "$SPECTRAL_MODULE" | rg --fixed-strings '@rpath/libSignalSieveCore.dylib'; then
+if ! otool -L "$SPECTRAL_MODULE" | grep -F '@rpath/libSignalSieveCore.dylib'; then
     print -u2 "Bundled spectral pixel module does not use the private core framework."
     exit 1
 fi
 
-if ! otool -l "$SPECTRAL_MODULE" | rg --fixed-strings '@executable_path/../../../Frameworks'; then
+if ! otool -l "$SPECTRAL_MODULE" | grep -F '@executable_path/../../../Frameworks'; then
     print -u2 "Bundled spectral pixel module is missing its packaged Frameworks rpath."
     exit 1
 fi
 
-if rg --line-number 'URLSession|NWConnection|NWBrowser|import Network|WKWebView' \
+if grep -rnE 'URLSession|NWConnection|NWBrowser|import Network|WKWebView' \
         "$PROJECT_ROOT/Sources"; then
     print -u2 "Unexpected in-process network client found in privacy-sensitive sources."
     exit 1
 fi
 
-if find "$PROJECT_ROOT/Sources" "$PROJECT_ROOT/Tests" -type l | rg '.'; then
+if find "$PROJECT_ROOT/Sources" "$PROJECT_ROOT/Tests" -type l | grep '.'; then
     print -u2 "Source or test symlinks are not allowed by the quality gate."
     exit 1
 fi
