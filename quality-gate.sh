@@ -28,34 +28,18 @@ fi
 
 "$PROJECT_ROOT/check.sh"
 
-RESTRICTION_TESTS=(
-    "$PROJECT_ROOT/Tests/SignalSieveCoreTests/ClipboardProtectionAnalyzerTests.swift"
-    "$PROJECT_ROOT/Tests/SignalSieveCoreTests/ClipboardImageImporterTests.swift"
-    "$PROJECT_ROOT/Tests/SignalSieveCoreTests/ExternalPixelWatermarkEngineTests.swift"
-    "$PROJECT_ROOT/Tests/SignalSieveCoreTests/FileMetadataCleanerTests.swift"
-    "$PROJECT_ROOT/Tests/SignalSieveCoreTests/FileProvenanceAnalyzerTests.swift"
-    "$PROJECT_ROOT/Tests/SignalSieveCoreTests/HiddenTextAnalyzerTests.swift"
-    "$PROJECT_ROOT/Tests/SignalSieveCoreTests/LocalRewriteEngineTests.swift"
-    "$PROJECT_ROOT/Tests/SignalSieveCoreTests/PixelLSBForensicsTests.swift"
-    "$PROJECT_ROOT/Tests/SignalSieveCoreTests/PixelSpectralForensicsTests.swift"
-    "$PROJECT_ROOT/Tests/SignalSieveCoreTests/TextCleanerTests.swift"
-    "$PROJECT_ROOT/Tests/SignalSieveCoreTests/VaccineEngineTests.swift"
-    "$PROJECT_ROOT/Tests/SignalSieveCoreTests/WatermarkProbeAnalyzerTests.swift"
-)
-for test_file in "${RESTRICTION_TESTS[@]}"; do
-    swiftc \
-        -typecheck \
-        -warnings-as-errors \
-        -target "$TARGET_ARCH-apple-macosx13.0" \
-        -sdk "$SDK_PATH" \
-        -module-cache-path "$MODULE_CACHE" \
-        -I "$PROJECT_ROOT/.build/manual" \
-        -I "$PROJECT_ROOT/Sources/CSignalSieveZip/include" \
-        -F "$TESTING_FRAMEWORKS" \
-        -enable-testing \
-        -Xfrontend -disable-cross-import-overlays \
-        "$test_file"
-done
+swiftc \
+    -typecheck \
+    -warnings-as-errors \
+    -target "$TARGET_ARCH-apple-macosx13.0" \
+    -sdk "$SDK_PATH" \
+    -module-cache-path "$MODULE_CACHE" \
+    -I "$PROJECT_ROOT/.build/manual" \
+    -I "$PROJECT_ROOT/Sources/CSignalSieveZip/include" \
+    -F "$TESTING_FRAMEWORKS" \
+    -enable-testing \
+    -Xfrontend -disable-cross-import-overlays \
+    "$PROJECT_ROOT/Tests/SignalSieveCoreTests"/*.swift
 
 for script in "$PROJECT_ROOT"/*.sh "$PROJECT_ROOT"/*.command; do
     zsh -n "$script"

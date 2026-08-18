@@ -106,8 +106,8 @@ func revealsVisibleContextFallback() {
 
     #expect(preview?.presentation == .visibleContext)
     #expect(preview?.codePoint == "U+FE0F")
-    #expect(preview?.text.contains("Hola"))
-    #expect(preview?.text.contains("⟦U+FE0F⟧"))
+    #expect(preview?.text.contains("Hola") == true)
+    #expect(preview?.text.contains("⟦U+FE0F⟧") == true)
 }
 
 private func unicodeTags(_ text: String) -> String {

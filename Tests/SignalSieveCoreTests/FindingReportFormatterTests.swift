@@ -58,7 +58,7 @@ func formatsNewEvidenceReports() {
         provenance,
         language: .english
     )
-    #expect(provenanceText.contains("read-only", options: .caseInsensitive))
+    #expect(provenanceText.localizedCaseInsensitiveContains("read-only"))
     #expect(provenanceText.contains("No embedded C2PA container"))
 
     let rewrite = RewriteIntegrityAnalyzer.analyze(
