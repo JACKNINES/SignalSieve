@@ -16,21 +16,56 @@ struct VaccineView: View {
     @State private var showsSmartAssAchievement = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Label(localized("Vaccine"), systemImage: "syringe.fill")
-                        .font(.title2.weight(.semibold))
-                    Text(localized("Scan a project locally before changing any file"))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+        SheetScaffold(
+            title: localized("Vaccine"),
+            subtitle: localized("Scan a project locally before changing any file"),
+            systemImage: "syringe.fill",
+            doneTitle: localized("Done"),
+            onDone: { dismiss() },
+            footerNote: localized("Encoded data, file metadata, and review-only findings are reported but never rewritten."),
+            content: { scanContent },
+            footer: {
+                Button(localized("Vaccinate Safe Findings…"), systemImage: "shield.checkered") {
+                    attemptVaccination()
                 }
-                Spacer()
-                Button(localized("Done")) { dismiss() }
+                .sieveSheetButton(.primary)
+                .disabled(isVaccinationBlocked)
             }
+        )
+        .frame(minWidth: 860, minHeight: 680)
+        .confirmationDialog(
+            localized("Vaccinate the selected project?"),
+            isPresented: $confirmsVaccination,
+            titleVisibility: .visible
+        ) {
+            Button(localized("Create Backup and Vaccinate")) { vaccinate() }
+            Button(localized("Cancel"), role: .cancel) {}
+        } message: {
+            Text(localized("Only safely removable Unicode controls and safe punctuation/whitespace replacements will be applied. A complete backup of every changed file is created first."))
+        }
+        .overlay(alignment: .top) {
+            if showsSmartAssAchievement {
+                SmartAssAchievementView()
+                    .padding(.top, 16)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(100)
+            }
+        }
+    }
 
-            HStack(spacing: 10) {
+    /// The footer action stays visible at all times, so it has to describe its
+    /// own preconditions rather than relying on being absent.
+    private var isVaccinationBlocked: Bool {
+        guard let report, !isWorking else { return true }
+        return report.sanitizableFileCount == 0 && !report.isSignalSieveTarget
+    }
+
+    private var scanContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 9) {
                 Button(localized("Choose Folder…"), systemImage: "folder", action: chooseFolder)
+                    .sieveSheetButton()
+
                 if let rootURL {
                     Text(rootURL.path)
                         .font(.caption.monospaced())
@@ -41,13 +76,18 @@ struct VaccineView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
+
+                Spacer(minLength: 8)
+
                 if let report, !report.findings.isEmpty {
                     Button(localized("Copy Findings"), systemImage: "doc.on.doc") {
                         onCopy(FindingReportFormatter.vaccineReport(report, language: language))
                     }
+                    .sieveSheetButton()
                 }
+
                 Button(localized("Scan"), systemImage: "magnifyingglass") { scan() }
+                    .sieveSheetButton(.primary)
                     .disabled(rootURL == nil || isWorking)
             }
 
@@ -73,20 +113,6 @@ struct VaccineView: View {
                     selfVaccinationWarning
                 }
                 findings(report)
-                HStack {
-                    Text(localized("Encoded data, file metadata, and review-only findings are reported but never rewritten."))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button(localized("Vaccinate Safe Findings…"), systemImage: "shield.checkered") {
-                        attemptVaccination()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(
-                        (report.sanitizableFileCount == 0 && !report.isSignalSieveTarget)
-                            || isWorking
-                    )
-                }
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "folder.badge.questionmark")
@@ -104,26 +130,6 @@ struct VaccineView: View {
 
             if let result {
                 resultBanner(result)
-            }
-        }
-        .padding(20)
-        .frame(minWidth: 820, minHeight: 620)
-        .confirmationDialog(
-            localized("Vaccinate the selected project?"),
-            isPresented: $confirmsVaccination,
-            titleVisibility: .visible
-        ) {
-            Button(localized("Create Backup and Vaccinate")) { vaccinate() }
-            Button(localized("Cancel"), role: .cancel) {}
-        } message: {
-            Text(localized("Only safely removable Unicode controls and safe punctuation/whitespace replacements will be applied. A complete backup of every changed file is created first."))
-        }
-        .overlay(alignment: .top) {
-            if showsSmartAssAchievement {
-                SmartAssAchievementView()
-                    .padding(.top, 16)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .zIndex(100)
             }
         }
     }
@@ -162,21 +168,13 @@ struct VaccineView: View {
     }
 
     private func summary(_ report: VaccineScanReport) -> some View {
-        HStack(spacing: 16) {
-            summaryItem("Text files scanned", report.scannedFileCount, .blue)
-            summaryItem("Metadata files scanned", report.provenanceScannedFileCount, .blue)
-            summaryItem("Files with findings", report.affectedFileCount, .orange)
-            summaryItem("Safe to vaccinate", report.sanitizableFileCount, .green)
-            summaryItem("Metadata findings", report.totalMetadataFindingCount, .purple)
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 8) {
+            SheetStatTile(value: "\(report.scannedFileCount)", label: localized("Text files scanned"))
+            SheetStatTile(value: "\(report.provenanceScannedFileCount)", label: localized("Metadata files scanned"))
+            SheetStatTile(value: "\(report.affectedFileCount)", label: localized("Files with findings"))
+            SheetStatTile(value: "\(report.sanitizableFileCount)", label: localized("Safe to vaccinate"))
+            SheetStatTile(value: "\(report.totalMetadataFindingCount)", label: localized("Metadata findings"))
         }
-    }
-
-    private func summaryItem(_ label: String, _ value: Int, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("\(value)").font(.title3.monospacedDigit().weight(.semibold)).foregroundStyle(color)
-            Text(localized(label)).font(.caption).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func findings(_ report: VaccineScanReport) -> some View {

@@ -48,8 +48,9 @@ SignalSieve is designed around local processing and data minimization.
 - Active Guard, each warning category, and automatic link cleaning are
   controlled independently from the app. Preferences are stored locally; copied
   text is not included in those preferences.
-- The selected interface language is stored as a short local preference (`en`,
-  `es`, or `nb`) and contains no processed text.
+- The selected interface language and appearance are stored as short local
+  preferences (`en`, `es`, or `nb`; `system`, `light`, or `dark`) and contain
+  no processed text.
 - The packaged app migrates only the known protection and language preferences
   from the earlier executable build. It never migrates clipboard contents or
   Pattern Memory samples.

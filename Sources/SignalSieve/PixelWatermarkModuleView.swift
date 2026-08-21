@@ -29,70 +29,56 @@ struct PixelWatermarkModuleView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    trustBoundary
-                    moduleCard
-                    imageCard
-                    if let score { scoreCard(score) }
-                    if let regeneration { regenerationCard(regeneration) }
+        SheetScaffold(
+            title: localized("Pixel Watermark Lab"),
+            subtitle: localized("Built-in LSB and spectral screening, plus advanced external modules"),
+            systemImage: "photo.badge.magnifyingglass",
+            doneTitle: localized("Done"),
+            onDone: { dismiss() },
+            footerNote: localized(bundledModuleKind != nil
+                ? "Built-in forensic module · local and offline"
+                : "External module · explicit execution only"),
+            content: { labContent },
+            footer: {
+                if !availableBundledModules.isEmpty {
+                    Menu {
+                        if bundledModuleURL(for: .spectral) != nil {
+                            Button(localized("Use Spectral Carrier Lab")) {
+                                loadBundledModule(.spectral, showError: true)
+                            }
+                        }
+                        if bundledModuleURL(for: .lsb) != nil {
+                            Button(localized("Use LSB Baseline")) {
+                                loadBundledModule(.lsb, showError: true)
+                            }
+                        }
+                    } label: {
+                        SieveMenuLabel(title: localized("Built-in Modules"), systemImage: "checkmark.shield")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
                 }
-                .padding(18)
+                Button(localized("Choose Module Folder…"), systemImage: "shippingbox", action: chooseModule)
+                    .sieveSheetButton(.primary)
             }
-            Divider()
-            HStack {
-                Text(localized(bundledModuleKind != nil
-                    ? "Built-in forensic module · local and offline"
-                    : "External module · explicit execution only"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button(localized("Done")) { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(16)
-        }
-        .frame(minWidth: 760, minHeight: 680)
+        )
+        .frame(minWidth: 780, minHeight: 700)
         .onAppear {
             if module == nil { loadBundledModule(.spectral, showError: false) }
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "photo.badge.magnifyingglass")
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(.purple)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(localized("Pixel Watermark Lab"))
-                    .font(.title2.weight(.semibold))
-                Text(localized("Built-in LSB and spectral screening, plus advanced external modules"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+    private var labContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                trustBoundary
+                moduleCard
+                imageCard
+                if let score { scoreCard(score) }
+                if let regeneration { regenerationCard(regeneration) }
             }
-            Spacer()
-            if !availableBundledModules.isEmpty {
-                Menu {
-                    if bundledModuleURL(for: .spectral) != nil {
-                        Button(localized("Use Spectral Carrier Lab")) {
-                            loadBundledModule(.spectral, showError: true)
-                        }
-                    }
-                    if bundledModuleURL(for: .lsb) != nil {
-                        Button(localized("Use LSB Baseline")) {
-                            loadBundledModule(.lsb, showError: true)
-                        }
-                    }
-                } label: {
-                    Label(localized("Built-in Modules"), systemImage: "checkmark.shield")
-                }
-            }
-            Button(localized("Choose Module Folder…"), systemImage: "shippingbox", action: chooseModule)
         }
-        .padding(20)
     }
 
     private var trustBoundary: some View {

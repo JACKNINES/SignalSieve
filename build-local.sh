@@ -65,6 +65,7 @@ swiftc \
     -emit-library \
     -module-name SignalSieveCore \
     "$PROJECT_ROOT/Sources/SignalSieveCore/AppLocalization.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/AppTheme.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/BinaryContentDetector.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/BoundedZIPReader.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/BoundedZIPRewriter.swift" \
@@ -156,6 +157,8 @@ swiftc \
     "$PROJECT_ROOT/Sources/SignalSieve/FindingCopyButton.swift" \
     "$PROJECT_ROOT/Sources/SignalSieve/FileProvenanceView.swift" \
     "$PROJECT_ROOT/Sources/SignalSieve/ContentView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/SieveControls.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/SheetScaffold.swift" \
     "$PROJECT_ROOT/Sources/SignalSieve/PatternReportView.swift" \
     "$PROJECT_ROOT/Sources/SignalSieve/PixelWatermarkModuleView.swift" \
     "$PROJECT_ROOT/Sources/SignalSieve/PrivateRulesView.swift" \

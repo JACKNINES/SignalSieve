@@ -20,6 +20,8 @@ on important files.
 - Fresh installations start in English. The language menu switches instantly
   between English, Spanish, and Norwegian Bokmål, and the selected language is
   stored locally for later launches.
+- Follows the macOS appearance by default, with persistent Automatic, Light,
+  and Dark theme choices available from the toolbar.
 - Includes an original dark-blue Signal Sieve icon with a shield, signal, and
   illuminated sieve.
 - **Active Guard:** watches for new clipboard content while SignalSieve is running and

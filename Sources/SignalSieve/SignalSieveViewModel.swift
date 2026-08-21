@@ -33,6 +33,10 @@ final class SignalSieveViewModel: ObservableObject {
         }
     }
 
+    @Published var theme: AppTheme {
+        didSet { defaults.set(theme.rawValue, forKey: PreferenceKey.theme) }
+    }
+
     @Published var isActiveProtectionEnabled: Bool {
         didSet {
             defaults.set(isActiveProtectionEnabled, forKey: PreferenceKey.activeProtection)
@@ -90,6 +94,9 @@ final class SignalSieveViewModel: ObservableObject {
         self.defaults = defaults
         self.language = AppLanguage.persistedOrEnglish(
             defaults.string(forKey: PreferenceKey.language)
+        )
+        self.theme = AppTheme.persistedOrSystem(
+            defaults.string(forKey: PreferenceKey.theme)
         )
         self.isActiveProtectionEnabled = Self.storedBool(
             PreferenceKey.activeProtection,
@@ -826,6 +833,7 @@ final class SignalSieveViewModel: ObservableObject {
         static let patternWarnings = "activeProtection.warn.patterns"
         static let automaticLinkCleaning = "activeProtection.autoCleanLinks"
         static let language = "appearance.language"
+        static let theme = "appearance.theme"
         static let legacyPreferencesMigrated = "migration.legacyExecutablePreferences.v1"
     }
 }

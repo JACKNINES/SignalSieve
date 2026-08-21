@@ -38,9 +38,60 @@ struct FileProvenanceView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
+        SheetScaffold(
+            title: localized("File Provenance Inspector"),
+            subtitle: localized("Local inspection of C2PA and common metadata containers"),
+            systemImage: "doc.text.magnifyingglass",
+            doneTitle: localized("Done"),
+            onDone: { dismiss() },
+            footerNote: localized("Original stays untouched · cleaning creates a new copy"),
+            content: { provenanceContent },
+            footer: {
+                if let report, !report.findings.isEmpty {
+                    Button(localized("Copy Findings"), systemImage: "doc.on.doc") {
+                        onCopy(FindingReportFormatter.fileProvenanceReport(
+                            report,
+                            language: language
+                        ))
+                    }
+                    .sieveSheetButton()
+                }
+                if let report,
+                   selectedURL != nil,
+                   !report.findings.isEmpty,
+                   FileMetadataCleaner.supports(report.format) {
+                    Button(localized("Create Clean Copy…"), systemImage: "doc.badge.plus") {
+                        createCleanCopy()
+                    }
+                    .sieveSheetButton(.primary)
+                }
+                if clipboardImage != nil {
+                    Button(localized("Create Fresh Clean Image"), systemImage: "photo.badge.checkmark") {
+                        createFreshClipboardImage()
+                    }
+                    .sieveSheetButton(.primary)
+                }
+            }
+        )
+        .frame(minWidth: 760, minHeight: 640)
+    }
+
+    private var provenanceContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Choosing what to inspect stays at the top; acting on the result
+            // stays in the footer.
+            HStack(spacing: 9) {
+                Button(localized("Paste Image"), systemImage: "doc.on.clipboard") {
+                    pasteClipboardImage()
+                }
+                .sieveSheetButton()
+                .help(localized("Paste the current clipboard image and inspect its bytes locally."))
+
+                Button(localized("Choose File…"), systemImage: "folder", action: chooseFile)
+                    .sieveSheetButton(.primary)
+
+                Spacer(minLength: 8)
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -66,70 +117,8 @@ struct FileProvenanceView: View {
                     }
                     limitationCard
                 }
-                .padding(18)
             }
-
-            Divider()
-            HStack {
-                Label(localized("Original stays untouched · cleaning creates a new copy"), systemImage: "lock.shield.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if let report {
-                    Button(localized("Copy Findings"), systemImage: "doc.on.doc") {
-                        onCopy(FindingReportFormatter.fileProvenanceReport(
-                            report,
-                            language: language
-                        ))
-                    }
-                }
-                if let report,
-                   selectedURL != nil,
-                   !report.findings.isEmpty,
-                   FileMetadataCleaner.supports(report.format) {
-                    Button(localized("Create Clean Copy…"), systemImage: "doc.badge.plus") {
-                        createCleanCopy()
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                if clipboardImage != nil {
-                    Button(localized("Create Fresh Clean Image"), systemImage: "photo.badge.checkmark") {
-                        createFreshClipboardImage()
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                Button(localized("Paste Image"), systemImage: "doc.on.clipboard") {
-                    pasteClipboardImage()
-                }
-                Button(localized("Choose File…"), systemImage: "doc.badge.magnifyingglass", action: chooseFile)
-                Button(localized("Done")) { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(16)
         }
-        .frame(minWidth: 720, minHeight: 620)
-    }
-
-    private var header: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(localized("File Provenance Inspector"))
-                    .font(.title2.weight(.semibold))
-                Text(localized("Local inspection of C2PA and common metadata containers"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button(localized("Paste Image"), systemImage: "doc.on.clipboard") {
-                pasteClipboardImage()
-            }
-            .help(localized("Paste the current clipboard image and inspect its bytes locally."))
-            Button(localized("Choose File…"), systemImage: "folder", action: chooseFile)
-        }
-        .padding(20)
     }
 
     private var emptyState: some View {

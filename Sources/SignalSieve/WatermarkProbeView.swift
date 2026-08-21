@@ -11,61 +11,36 @@ struct WatermarkProbeView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    assessmentCard
-                    exactLayerCard
-                    providerStatusCard
-                    sampleCard
-                    signalCards
-                    limitationCard
-                }
-                .padding(18)
-            }
-
-            Divider()
-            HStack {
-                Text(localized("Processed locally · no text is uploaded"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
+        SheetScaffold(
+            title: localized("Surface Regularity"),
+            subtitle: localized("Keyless stylometric screen of visible writing patterns"),
+            systemImage: "waveform.badge.magnifyingglass",
+            doneTitle: localized("Done"),
+            onDone: { dismiss() },
+            headerBadge: localized("Experimental"),
+            footerNote: localized("Processed locally · no text is uploaded"),
+            content: { probeContent },
+            footer: {
                 Button(localized("Copy Findings"), systemImage: "doc.on.doc") {
                     onCopy(FindingReportFormatter.watermarkProbeReport(report, language: language))
                 }
-                Button(localized("Done")) { dismiss() }
-                    .keyboardShortcut(.defaultAction)
+                .sieveSheetButton(.primary)
             }
-            .padding(16)
-        }
-        .frame(minWidth: 680, minHeight: 620)
+        )
+        .frame(minWidth: 700, minHeight: 640)
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "waveform.badge.magnifyingglass")
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(localized("Surface Regularity"))
-                        .font(.title2.weight(.semibold))
-                    Text(localized("Experimental"))
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(.blue.opacity(0.13), in: Capsule())
-                }
-                Text(localized("Keyless stylometric screen of visible writing patterns"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+    private var probeContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                assessmentCard
+                exactLayerCard
+                providerStatusCard
+                sampleCard
+                signalCards
+                limitationCard
             }
-            Spacer()
         }
-        .padding(20)
     }
 
     private var assessmentCard: some View {

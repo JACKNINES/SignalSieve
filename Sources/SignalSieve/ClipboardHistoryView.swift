@@ -13,47 +13,37 @@ struct ClipboardHistoryView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-
-            if entries.isEmpty {
-                emptyState
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(entries) { entry in
-                            historyCard(entry)
-                        }
-                    }
-                    .padding(18)
-                }
+        SheetScaffold(
+            title: localized("Copy History"),
+            subtitle: localized("Session only · stored locally in memory"),
+            systemImage: "clock.arrow.circlepath",
+            doneTitle: localized("Done"),
+            onDone: { dismiss() },
+            headerBadge: formatted("%d copies", entries.count),
+            footerNote: localized("The source is inferred from the active app. Browser tab and page URLs are not available. Concealed and transient copies are not stored."),
+            content: { historyContent },
+            footer: {
+                Button(localized("Clear History"), role: .destructive, action: onClear)
+                    .sieveSheetButton(.destructive)
+                    .disabled(entries.isEmpty)
             }
-
-            Divider()
-            footer
-        }
-        .frame(minWidth: 720, minHeight: 620)
+        )
+        .frame(minWidth: 740, minHeight: 640)
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(.title2)
-                .foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(localized("Copy History"))
-                    .font(.title2.weight(.semibold))
-                Text(localized("Session only · stored locally in memory"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+    @ViewBuilder
+    private var historyContent: some View {
+        if entries.isEmpty {
+            emptyState
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(entries) { entry in
+                        historyCard(entry)
+                    }
+                }
             }
-            Spacer()
-            Text(formatted("%d copies", entries.count))
-                .font(.subheadline.monospacedDigit())
-            Button(localized("Done")) { dismiss() }
         }
-        .padding(20)
     }
 
     private var emptyState: some View {
@@ -151,23 +141,6 @@ struct ClipboardHistoryView: View {
         }
     }
 
-    private var footer: some View {
-        HStack {
-            Label(
-                localized("The source is inferred from the active app. Browser tab and page URLs are not available."),
-                systemImage: "hand.raised.fill"
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            Text(localized("Concealed and transient copies are not stored."))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button(localized("Clear History"), role: .destructive, action: onClear)
-                .disabled(entries.isEmpty)
-        }
-        .padding(16)
-    }
 
     private func sourceIcon(_ entry: ClipboardHistoryEntry) -> some View {
         Group {

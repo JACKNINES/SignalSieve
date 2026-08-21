@@ -228,16 +228,34 @@ private struct ClipboardNoticeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "shield.lefthalf.filled.badge.checkmark")
-                    .font(.title2)
-                    .foregroundStyle(notice.isHighPriority ? .red : .orange)
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .top, spacing: 11) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill((notice.isHighPriority ? Color.red : Color.orange).opacity(0.16))
+                    Image(systemName: "shield.lefthalf.filled.badge.checkmark")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(notice.isHighPriority ? .red : .orange)
+                }
+                .frame(width: 32, height: 32)
+                .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 3) {
                     Text(headline)
                         .font(.headline)
                     Text(localized("SignalSieve inspected this copy locally. Clipboard contents were not uploaded."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    // The severity notice belongs with the headline, not as a
+                    // loose line under it.
+                    if notice.isHighPriority {
+                        Label(
+                            localized("High-priority finding · this alert stays in front until you close it"),
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.red)
+                        .padding(.top, 1)
+                    }
                 }
                 Spacer()
                 Button(action: onDismiss) {
@@ -246,16 +264,6 @@ private struct ClipboardNoticeView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .accessibilityLabel(localized("Dismiss"))
-            }
-
-
-            if notice.isHighPriority {
-                Label(
-                    localized("High-priority finding · this alert stays in front until you close it"),
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.red)
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -337,6 +345,7 @@ private struct ClipboardNoticeView: View {
                 HStack(spacing: 10) {
                     if !notice.clipboardText.isEmpty {
                         Button(localized("Open Details"), action: onReview)
+                            .sieveSheetButton(.primary)
                             .help(localized("Opens SignalSieve with the copied text and its exact findings."))
                     }
                     if notice.clipboardContentKinds.contains(.image)
@@ -347,18 +356,19 @@ private struct ClipboardNoticeView: View {
                                 : "Open File Inspector"),
                             action: onOpenFileInspector
                         )
-                            .buttonStyle(.borderedProminent)
+                            .sieveSheetButton(.primary)
                             .help(localized(notice.clipboardContentKinds.contains(.image)
                                 ? "Paste the current clipboard image into the read-only inspector and analyze it locally."
                                 : "Open the read-only inspector to choose and analyze the copied file."))
                     }
                     if notice.trackedLinkCount > 0 {
                         Button(localized("Clean Link Once"), action: onCleanLinks)
-                            .buttonStyle(.borderedProminent)
+                            .sieveSheetButton(.primary)
                             .help(localized("Cleans only the current clipboard copy after confirming it has not changed."))
                     }
                     if notice.patternReport.hasSuspiciousRepetition {
                         Button(localized("Open Pattern Report"), action: onShowPatterns)
+                            .sieveSheetButton()
                             .help(localized("Opens the local comparison of recent session-only text samples."))
                     }
                     Spacer(minLength: 0)
@@ -370,10 +380,12 @@ private struct ClipboardNoticeView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Button(localized("Turn On Automatic Link Cleaning"), action: onEnableAutoClean)
+                            .sieveSheetButton()
                             .help(localized("Automatically cleans known tracking parameters from future copied links."))
                     }
                     Spacer()
                     Button(localized("Close"), action: onDismiss)
+                        .sieveSheetButton()
                 }
             }
             .controlSize(.regular)
@@ -382,6 +394,12 @@ private struct ClipboardNoticeView: View {
         .padding(20)
         .frame(width: 700)
         .background(.regularMaterial)
+        .overlay(alignment: .top) {
+            // Severity reads before any word does.
+            Rectangle()
+                .fill(notice.isHighPriority ? Color.red : Color.orange)
+                .frame(height: 3)
+        }
     }
 
     private var headline: String {

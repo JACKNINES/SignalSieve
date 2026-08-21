@@ -21,6 +21,7 @@ private struct MainWindowRoot: View {
     var body: some View {
         ContentView(model: model)
             .frame(minWidth: 1_000, minHeight: 720)
+            .preferredColorScheme(model.theme.colorScheme)
             .onAppear {
                 model.registerMainWindowOpener {
                     openWindow(id: "main")

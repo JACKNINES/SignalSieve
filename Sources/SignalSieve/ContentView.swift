@@ -13,6 +13,16 @@ struct ContentView: View {
     @State private var showsWatermarkProbe = false
     @State private var showsRewriteIntegrity = false
     @State private var showsPixelWatermarkModule = false
+    @State private var toolbarSection: ToolbarSection = .review
+    @State private var expandedPanel: EditorPanel?
+
+    /// Which editor panel, if any, is currently taking the full window width.
+    private enum EditorPanel: String, Identifiable {
+        case input
+        case result
+
+        var id: String { rawValue }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,21 +31,8 @@ struct ContentView: View {
             controls
             Divider()
 
-            HSplitView {
-                editorPanel(
-                    title: model.localized("Input"),
-                    subtitle: model.localized("Paste or type text to inspect"),
-                    systemImage: "text.cursor",
-                    text: $model.input
-                )
-                editorPanel(
-                    title: model.localized("Result"),
-                    subtitle: model.localized("Review before copying"),
-                    systemImage: "checkmark.square",
-                    text: $model.output
-                )
-            }
-            .frame(minHeight: 330)
+            editors
+                .frame(minHeight: 330)
 
             Divider()
             findingsPanel
@@ -142,6 +139,8 @@ struct ContentView: View {
 
             Spacer()
 
+            ThemePicker(selection: $model.theme, localized: model.localized)
+
             Menu {
                 ForEach(AppLanguage.allCases) { language in
                     Button {
@@ -184,126 +183,194 @@ struct ContentView: View {
         }
     }
 
+    /// One contextual row instead of three permanently stacked ones. The
+    /// segmented control decides which tools are on screen, which frees the
+    /// vertical space the three row headers used to take.
     private var controls: some View {
-        VStack(spacing: 7) {
-            toolbarRow(title: "Review", systemImage: "doc.text.magnifyingglass", tint: .blue) {
-                Button(model.localized("Paste"), systemImage: "doc.on.clipboard", action: model.paste)
-                Button(model.localized("Inspect"), systemImage: "magnifyingglass", action: model.inspect)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.blue)
-                Button(model.localized("Reveal"), systemImage: "eye.fill") {
-                    showsReveal = true
-                }
-                .disabled(model.revealedFragments.isEmpty)
-                .help(model.localized("Reveal known invisible encodings without executing their contents."))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                ToolbarSectionPicker(selection: $toolbarSection, localized: model.localized)
+                    .accessibilityLabel(model.localized("Toolbar section"))
 
-                Menu(model.localized("Memory"), systemImage: "brain.head.profile") {
-                    Button(model.localized("Remember Current Text"), action: model.rememberCurrentText)
-                    Button(model.localized("View Pattern Report"), action: model.showPatternReport)
-                    Divider()
-                    Button(model.localized("Clear Session Memory"), role: .destructive, action: model.clearPatternMemory)
-                }
-                .fixedSize()
+                Text(model.localized(toolbarSection.hint))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
 
-                Button {
-                    showsClipboardHistory = true
-                } label: {
-                    HStack(spacing: 5) {
-                        Label(model.localized("History"), systemImage: "clock.arrow.circlepath")
-                        if model.clipboardHistoryCount > 0 {
-                            Text("\(model.clipboardHistoryCount)")
-                                .font(.caption2.monospacedDigit())
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(.blue.opacity(0.15), in: Capsule())
+                Spacer(minLength: 0)
+            }
+
+            // Scrolls rather than squeezing, so a long button title is never
+            // truncated at narrow window widths.
+            GeometryReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 6) {
+                        switch toolbarSection {
+                        case .review: reviewControls
+                        case .analyze: analyzeControls
+                        case .clean: cleanControls
                         }
                     }
+                    .frame(minWidth: proxy.size.width, alignment: .leading)
                 }
-                .help(model.localized("View copies recorded during this session"))
-
-                Menu(model.localized("Active Guard"), systemImage: "eye.circle") {
-                    Toggle(model.localized("Monitor New Clipboard Text"), isOn: $model.isActiveProtectionEnabled)
-                    Divider()
-                    Text(model.formatted(
-                        "%d of 6 warning types enabled",
-                        model.enabledWarningCount
-                    ))
-                    Toggle(model.localized("Warn About Hidden Unicode"), isOn: $model.warnsAboutHiddenUnicode)
-                    Toggle(model.localized("Warn About Tracked Links"), isOn: $model.warnsAboutTrackedLinks)
-                    Toggle(model.localized("Warn About Repeated Patterns"), isOn: $model.warnsAboutPatterns)
-                    Toggle(model.localized("Warn About Source-Code Risks"), isOn: $model.warnsAboutCodeRisks)
-                    Toggle(model.localized("Warn About Binary or Encoded Data"), isOn: $model.warnsAboutBinaryContent)
-                    Toggle(model.localized("Warn About File or Image Metadata"), isOn: $model.warnsAboutFileMetadata)
-                    Button(model.localized("Enable All Warning Types"), action: model.enableAllWarningTypes)
-                        .disabled(model.enabledWarningCount == 6)
-                    Divider()
-                    Toggle(model.localized("Automatically Clean Copied Links"), isOn: $model.automaticallyCleansLinks)
-                    Text(model.localized("Monitoring runs locally while SignalSieve is open."))
-                }
-                .fixedSize()
-
-                Button(model.localized("Rules"), systemImage: "slider.horizontal.3") {
-                    showsPrivateRules = true
-                }
-                Spacer()
+                .scrollIndicators(.hidden)
             }
+            .frame(height: 26)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
 
-            toolbarRow(title: "Analyze", systemImage: "waveform.badge.magnifyingglass", tint: .indigo) {
-                Button(model.localized("Vaccine"), systemImage: "syringe.fill") {
-                    showsVaccine = true
+    @ViewBuilder
+    private var reviewControls: some View {
+        Button(model.localized("Paste"), systemImage: "doc.on.clipboard", action: model.paste)
+            .sieveToolbarButton()
+        Button(model.localized("Inspect"), systemImage: "magnifyingglass", action: model.inspect)
+            .sieveToolbarButton(.primary)
+        Button(model.localized("Reveal"), systemImage: "eye.fill") {
+            showsReveal = true
+        }
+        .sieveToolbarButton()
+        .disabled(model.revealedFragments.isEmpty)
+        .help(model.localized("Reveal known invisible encodings without executing their contents."))
+
+        SieveToolbarDivider()
+
+        Menu {
+            Button(model.localized("Remember Current Text"), action: model.rememberCurrentText)
+            Button(model.localized("View Pattern Report"), action: model.showPatternReport)
+            Divider()
+            Button(model.localized("Clear Session Memory"), role: .destructive, action: model.clearPatternMemory)
+        } label: {
+            SieveMenuLabel(title: model.localized("Memory"), systemImage: "brain.head.profile")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+
+        Button {
+            showsClipboardHistory = true
+        } label: {
+            HStack(spacing: 5) {
+                Label(model.localized("History"), systemImage: "clock.arrow.circlepath")
+                if model.clipboardHistoryCount > 0 {
+                    Text("\(model.clipboardHistoryCount)")
+                        .font(.caption2.monospacedDigit())
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(.blue.opacity(0.15), in: Capsule())
                 }
-                Button(model.localized("Signature Hunt"), systemImage: "scope") {
-                    showsSignatureHunt = true
-                }
-                Button(model.localized("File Inspector"), systemImage: "doc.text.magnifyingglass") {
-                    model.openFileProvenanceInspector()
-                }
-                Button(model.localized("Pixel Lab"), systemImage: "photo.badge.magnifyingglass") {
-                    showsPixelWatermarkModule = true
-                }
-
-                Button(model.localized("Surface Regularity"), systemImage: "waveform.badge.magnifyingglass") {
-                    model.runWatermarkProbe()
-                    showsWatermarkProbe = true
-                }
-                .disabled(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .help(model.localized("Screens visible statistical regularity locally without claiming provider attribution."))
-
-                Button(model.localized("Rewrite Integrity"), systemImage: "arrow.left.arrow.right.square") {
-                    model.runRewriteIntegrity()
-                    showsRewriteIntegrity = true
-                }
-                .disabled(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .help(model.localized("Compares Input and Result or creates an optional local rewrite without claiming semantic equivalence."))
-
-                Spacer()
-            }
-
-            toolbarRow(title: "Clean", systemImage: "wand.and.stars", tint: .teal) {
-                Button(model.localized("Safe Clean")) { model.clean(mode: .safe) }
-                Button(model.localized("Strict Clean")) { model.clean(mode: .strict) }
-                Button(model.localized("Clean Links"), systemImage: "link.badge.plus", action: model.cleanLinks)
-                Button(model.localized("Code Clean (Review)"), systemImage: "chevron.left.forwardslash.chevron.right", action: model.cleanCodeForReview)
-                    .disabled(!model.codeAnalysis.isLikelyCode || model.codeAnalysis.sanitizableFindingCount == 0)
-                    .help(model.localized("Creates reviewable output without guessing replacements for look-alike identifiers."))
-
-                Spacer(minLength: 8)
-
-                Button(model.localized("Visual Transfer"), systemImage: "viewfinder", action: model.visualTransfer)
-                    .disabled(model.isProcessing || model.input.isEmpty || model.codeAnalysis.isLikelyCode)
-                    .help(model.codeAnalysis.isLikelyCode
-                        ? model.localized("Visual Transfer is disabled for source code because OCR can alter syntax.")
-                        : model.localized("Renders text to an image and reads it back with local OCR."))
-                Button(model.localized("Use Result"), systemImage: "arrow.left", action: model.moveOutputToInput)
-                    .disabled(model.output.isEmpty)
-                Button(model.localized("Copy Result"), systemImage: "doc.on.doc", action: model.copyOutput)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.output.isEmpty)
             }
         }
-        .controlSize(.small)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .sieveToolbarButton()
+        .help(model.localized("View copies recorded during this session"))
+
+        SieveToolbarDivider()
+
+        Menu {
+            Toggle(model.localized("Monitor New Clipboard Text"), isOn: $model.isActiveProtectionEnabled)
+            Divider()
+            Text(model.formatted(
+                "%d of 6 warning types enabled",
+                model.enabledWarningCount
+            ))
+            Toggle(model.localized("Warn About Hidden Unicode"), isOn: $model.warnsAboutHiddenUnicode)
+            Toggle(model.localized("Warn About Tracked Links"), isOn: $model.warnsAboutTrackedLinks)
+            Toggle(model.localized("Warn About Repeated Patterns"), isOn: $model.warnsAboutPatterns)
+            Toggle(model.localized("Warn About Source-Code Risks"), isOn: $model.warnsAboutCodeRisks)
+            Toggle(model.localized("Warn About Binary or Encoded Data"), isOn: $model.warnsAboutBinaryContent)
+            Toggle(model.localized("Warn About File or Image Metadata"), isOn: $model.warnsAboutFileMetadata)
+            Button(model.localized("Enable All Warning Types"), action: model.enableAllWarningTypes)
+                .disabled(model.enabledWarningCount == 6)
+            Divider()
+            Toggle(model.localized("Automatically Clean Copied Links"), isOn: $model.automaticallyCleansLinks)
+            Text(model.localized("Monitoring runs locally while SignalSieve is open."))
+        } label: {
+            SieveMenuLabel(title: model.localized("Active Guard"), systemImage: "eye.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+
+        Button(model.localized("Rules"), systemImage: "slider.horizontal.3") {
+            showsPrivateRules = true
+        }
+        .sieveToolbarButton()
+    }
+
+    @ViewBuilder
+    private var analyzeControls: some View {
+        Button(model.localized("Vaccine"), systemImage: "syringe.fill") {
+            showsVaccine = true
+        }
+        .sieveToolbarButton()
+        Button(model.localized("Signature Hunt"), systemImage: "scope") {
+            showsSignatureHunt = true
+        }
+        .sieveToolbarButton()
+        Button(model.localized("File Inspector"), systemImage: "doc.text.magnifyingglass") {
+            model.openFileProvenanceInspector()
+        }
+        .sieveToolbarButton()
+        Button(model.localized("Pixel Lab"), systemImage: "photo.badge.magnifyingglass") {
+            showsPixelWatermarkModule = true
+        }
+        .sieveToolbarButton()
+
+        SieveToolbarDivider()
+
+        // Tinted: these two act on whatever is in the Input panel right now.
+        Button(model.localized("Surface Regularity"), systemImage: "waveform.badge.magnifyingglass") {
+            model.runWatermarkProbe()
+            showsWatermarkProbe = true
+        }
+        .sieveToolbarButton(.accented)
+        .disabled(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .help(model.localized("Screens visible statistical regularity locally without claiming provider attribution."))
+
+        Button(model.localized("Rewrite Integrity"), systemImage: "arrow.left.arrow.right.square") {
+            model.runRewriteIntegrity()
+            showsRewriteIntegrity = true
+        }
+        .sieveToolbarButton(.accented)
+        .disabled(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .help(model.localized("Compares Input and Result or creates an optional local rewrite without claiming semantic equivalence."))
+    }
+
+    @ViewBuilder
+    private var cleanControls: some View {
+        Button(model.localized("Safe Clean"), systemImage: "wand.and.stars") { model.clean(mode: .safe) }
+            .sieveToolbarButton(.accented)
+        Button(model.localized("Strict Clean"), systemImage: "wand.and.sparkles") { model.clean(mode: .strict) }
+            .sieveToolbarButton()
+        Button(model.localized("Clean Links"), systemImage: "link.badge.plus", action: model.cleanLinks)
+            .sieveToolbarButton()
+        Button(
+            model.localized("Code Clean (Review)"),
+            systemImage: "chevron.left.forwardslash.chevron.right",
+            action: model.cleanCodeForReview
+        )
+        .sieveToolbarButton()
+        .disabled(!model.codeAnalysis.isLikelyCode || model.codeAnalysis.sanitizableFindingCount == 0)
+        .help(model.localized("Creates reviewable output without guessing replacements for look-alike identifiers."))
+
+        SieveToolbarDivider()
+
+        Button(model.localized("Visual Transfer"), systemImage: "viewfinder", action: model.visualTransfer)
+            .sieveToolbarButton()
+            .disabled(model.isProcessing || model.input.isEmpty || model.codeAnalysis.isLikelyCode)
+            .help(model.codeAnalysis.isLikelyCode
+                ? model.localized("Visual Transfer is disabled for source code because OCR can alter syntax.")
+                : model.localized("Renders text to an image and reads it back with local OCR."))
+
+        Spacer(minLength: 8)
+
+        Button(model.localized("Use Result"), systemImage: "arrow.left", action: model.moveOutputToInput)
+            .sieveToolbarButton()
+            .disabled(model.output.isEmpty)
+        Button(model.localized("Copy Result"), systemImage: "doc.on.doc", action: model.copyOutput)
+            .sieveToolbarButton(.primary)
+            .disabled(model.output.isEmpty)
     }
 
     private func statusPill(_ title: String, systemImage: String, color: Color) -> some View {
@@ -315,48 +382,82 @@ struct ContentView: View {
             .background(color.opacity(0.10), in: Capsule())
     }
 
-    private func toolbarRow<Content: View>(
-        title: String,
-        systemImage: String,
-        tint: Color,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        HStack(spacing: 8) {
-            Label(model.localized(title), systemImage: systemImage)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(tint)
-                .frame(width: 82, alignment: .leading)
-
-            Divider()
-                .frame(height: 23)
-
-            content()
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.52), in: RoundedRectangle(cornerRadius: 9))
-        .overlay {
-            RoundedRectangle(cornerRadius: 9)
-                .stroke(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 0.75)
+    @ViewBuilder
+    private var editors: some View {
+        switch expandedPanel {
+        case .input:
+            inputPanel
+        case .result:
+            resultPanel
+        case nil:
+            HSplitView {
+                inputPanel
+                resultPanel
+            }
         }
     }
 
+    private var inputPanel: some View {
+        editorPanel(
+            panel: .input,
+            title: model.localized("Input"),
+            subtitle: model.localized("Paste or type text to inspect"),
+            systemImage: "text.cursor",
+            tint: .blue,
+            expandHelp: model.localized("Expand Input to full width"),
+            text: $model.input
+        )
+    }
+
+    private var resultPanel: some View {
+        editorPanel(
+            panel: .result,
+            title: model.localized("Result"),
+            subtitle: model.localized("Review before copying"),
+            systemImage: "checkmark.square",
+            tint: .green,
+            expandHelp: model.localized("Expand Result to full width"),
+            text: $model.output
+        )
+    }
+
     private func editorPanel(
+        panel: EditorPanel,
         title: String,
         subtitle: String,
         systemImage: String,
+        tint: Color,
+        expandHelp: String,
         text: Binding<String>
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let isExpanded = expandedPanel == panel
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: systemImage)
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(tint)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title).font(.headline)
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
+
+                Spacer(minLength: 8)
+
+                Button {
+                    expandedPanel = isExpanded ? nil : panel
+                } label: {
+                    Image(systemName: isExpanded
+                        ? "arrow.down.right.and.arrow.up.left"
+                        : "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help(isExpanded ? model.localized("Restore both panels") : expandHelp)
+                .accessibilityLabel(isExpanded ? model.localized("Restore both panels") : expandHelp)
             }
 
             TextEditor(text: text)

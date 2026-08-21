@@ -10,36 +10,24 @@ struct RevealView: View {
     let onCopy: (String) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            content
-            Divider()
-            footer
-        }
-        .frame(minWidth: 680, idealWidth: 760, minHeight: 460, idealHeight: 560)
-    }
-
-    private var header: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "eye.fill")
-                .font(.title2)
-                .foregroundStyle(.purple)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(localized("Reveal Hidden Content"))
-                    .font(.title3.weight(.semibold))
-                Text(localized("Decode known invisible encodings without executing their contents."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        SheetScaffold(
+            title: localized("Reveal Hidden Content"),
+            subtitle: localized("Decode known invisible encodings without executing their contents."),
+            systemImage: "eye.fill",
+            doneTitle: localized("Close"),
+            onDone: { dismiss() },
+            headerBadge: formatted("%d revealed fragment(s)", fragments.count),
+            footerNote: localized("Revealed content is treated as data and is never executed."),
+            content: { content },
+            footer: {
+                Button(localized("Copy All Reveals"), systemImage: "doc.on.doc") {
+                    onCopy(FindingReportFormatter.revealedReport(fragments, language: language))
+                }
+                .sieveSheetButton(.primary)
+                .disabled(fragments.isEmpty)
             }
-            Spacer()
-            Text(formatted("%d revealed fragment(s)", fragments.count))
-                .font(.caption.monospacedDigit())
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(.purple.opacity(0.10), in: Capsule())
-        }
-        .padding(16)
+        )
+        .frame(minWidth: 700, idealWidth: 780, minHeight: 480, idealHeight: 580)
     }
 
     private var content: some View {
@@ -196,24 +184,6 @@ struct RevealView: View {
         }
     }
 
-    private var footer: some View {
-        HStack {
-            Label(
-                localized("Revealed content is treated as data and is never executed."),
-                systemImage: "lock.shield.fill"
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            Spacer()
-            Button(localized("Copy All Reveals"), systemImage: "doc.on.doc") {
-                onCopy(FindingReportFormatter.revealedReport(fragments, language: language))
-            }
-            .disabled(fragments.isEmpty)
-            Button(localized("Close")) { dismiss() }
-                .keyboardShortcut(.cancelAction)
-        }
-        .padding(14)
-    }
 
     private func presentationColor(_ presentation: RevealedFragmentPresentation) -> Color {
         switch presentation {

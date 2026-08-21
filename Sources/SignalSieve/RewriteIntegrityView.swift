@@ -22,180 +22,161 @@ struct RewriteIntegrityView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    localRewriteCard
-                    assessmentCard
-                    if report.originalTokenCount > 0 || report.candidateTokenCount > 0 {
-                        metricCard
-                    }
-                    semanticCard
-                    findings
-                    limitationCard
-                }
-                .padding(18)
-            }
-            Divider()
-            HStack {
-                Text(localized("Local comparison · optional rewrite uses loopback Ollama only"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
+        SheetScaffold(
+            title: localized("Rewrite Integrity"),
+            subtitle: localized("Compares Input and Result without rewriting either one"),
+            systemImage: "arrow.left.arrow.right.square",
+            doneTitle: localized("Done"),
+            onDone: { dismiss() },
+            footerNote: localized("Local comparison · optional rewrite uses loopback Ollama only"),
+            content: { integrityContent },
+            footer: {
                 Button(localized("Copy Findings"), systemImage: "doc.on.doc") {
                     onCopy(FindingReportFormatter.rewriteIntegrityReport(
                         report,
                         language: language
                     ))
                 }
-                Button(localized("Done")) { dismiss() }
-                    .keyboardShortcut(.defaultAction)
+                .sieveSheetButton(.primary)
             }
-            .padding(16)
-        }
-        .frame(minWidth: 680, minHeight: 590)
+        )
+        .frame(minWidth: 700, minHeight: 610)
         .task {
             refreshInstalledModels()
         }
     }
 
+    private var integrityContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                localRewriteCard
+                assessmentCard
+                if report.originalTokenCount > 0 || report.candidateTokenCount > 0 {
+                    metricCard
+                }
+                semanticCard
+                findings
+                limitationCard
+            }
+        }
+    }
+
+    /// Optional bridge to an already-installed Ollama model. Everything stays
+    /// on 127.0.0.1, and a missing model is never downloaded automatically.
     private var localRewriteCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label(localized("Optional Local Rewrite"), systemImage: "desktopcomputer")
+            HStack(spacing: 8) {
+                Label(localized("Optional Local Rewrite"), systemImage: "arrow.triangle.2.circlepath")
                     .font(.headline)
-                Spacer()
                 Text(localized("Best effort · never a watermark guarantee"))
-                    .font(.caption.weight(.medium))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(.orange.opacity(0.14), in: Capsule())
+                Spacer()
             }
+
             Text(localized("Uses an already-installed Ollama model on 127.0.0.1. Missing models are never downloaded automatically by Signal Sieve."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Label(
                 localized(LocalRewriteEngine.statisticalBiasWarning),
-                systemImage: "waveform.path.ecg"
+                systemImage: "exclamationmark.triangle.fill"
             )
-                .font(.caption)
-                .foregroundStyle(.orange)
+            .font(.caption)
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: 10) {
-                if installedModels.isEmpty {
-                    TextField(localized("Installed model name"), text: $modelName)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minWidth: 180)
-                } else {
-                    Picker(localized("Installed model"), selection: $modelName) {
-                        ForEach(installedModels, id: \.self) { model in
-                            Text(model).tag(model)
+            HStack(alignment: .bottom, spacing: 9) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(localized(installedModels.isEmpty ? "Installed model name" : "Installed model"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if installedModels.isEmpty {
+                        TextField("qwen3.5:4b", text: $modelName)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 200)
+                    } else {
+                        Picker("", selection: $modelName) {
+                            ForEach(installedModels, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 200)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(localized("Rewrite style"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("", selection: $rewriteStyle) {
+                        ForEach(LocalRewriteStyle.allCases) { style in
+                            Text(AppLocalization.text(style.rawValue, language: language)).tag(style)
                         }
                     }
-                    .frame(minWidth: 180)
+                    .labelsHidden()
+                    .frame(width: 210)
                 }
-                Button {
+
+                Spacer(minLength: 8)
+
+                Button(localized("Refresh Installed Models"), systemImage: "arrow.clockwise") {
                     refreshInstalledModels()
-                } label: {
-                    if isLoadingModels {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                    }
                 }
-                .help(localized("Refresh Installed Models"))
-                .disabled(isLoadingModels || LocalRewriteEngine.executableURL() == nil)
-                Picker(localized("Rewrite style"), selection: $rewriteStyle) {
-                    ForEach(LocalRewriteStyle.allCases) { style in
-                        Text(AppLocalization.text(style.rawValue, language: language))
-                            .tag(style)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Button(localized("Rewrite Locally"), systemImage: "wand.and.stars") {
+                .sieveSheetButton()
+                .disabled(isLoadingModels)
+
+                Button(localized("Rewrite Locally"), systemImage: "wand.and.rays") {
                     runLocalRewrite()
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    isRewriting
-                        || original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || LocalRewriteEngine.executableURL() == nil
-                )
+                .sieveSheetButton(.accented)
+                .disabled(isRewriting || original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
             if isRewriting {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text(localized("Rewriting with the local model…"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .font(.caption)
-            } else if LocalRewriteEngine.executableURL() == nil {
-                Label(
-                    localized("Ollama was not found in a supported local installation path."),
-                    systemImage: "exclamationmark.triangle"
-                )
+            }
+
+            if installedModels.isEmpty, !isLoadingModels, LocalRewriteEngine.executableURL() != nil {
+                Text(localized("Ollama is available, but no local models were found. Signal Sieve will not download one automatically."))
                     .font(.caption)
-                    .foregroundStyle(.orange)
-            } else if installedModels.isEmpty && !isLoadingModels {
-                Label(
-                    localized("Ollama is available, but no local models were found. Signal Sieve will not download one automatically."),
-                    systemImage: "externaldrive.badge.questionmark"
-                )
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let rewriteStatus {
                 Text(rewriteStatus)
                     .font(.caption)
-                    .foregroundStyle(lastRewrite == nil ? .red : .green)
+                    .foregroundStyle(lastRewrite == nil ? .orange : .green)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+
             if let lastRewrite {
-                HStack(spacing: 16) {
-                    Label(
-                        formatted(
-                            "%d%% lexical divergence",
-                            Int((lastRewrite.integrityReport.lexicalDivergence * 100).rounded())
-                        ),
-                        systemImage: "character.book.closed"
-                    )
-                    Label(
-                        localized(lastRewrite.integrityReport.hasProtectedValueChanges
-                            ? "Protected values changed — review required"
-                            : "No exact protected-value changes detected"),
-                        systemImage: lastRewrite.integrityReport.hasProtectedValueChanges
-                            ? "exclamationmark.triangle.fill"
-                            : "checkmark.circle"
-                    )
-                }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(lastRewrite.integrityReport.hasProtectedValueChanges ? .red : .blue)
+                Text(formatted(
+                    "%d%% lexical divergence",
+                    Int((lastRewrite.integrityReport.lexicalDivergence * 100).rounded())
+                ))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
             }
         }
         .padding(14)
-        .background(.blue.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
         .overlay {
             RoundedRectangle(cornerRadius: 10)
-                .stroke(.blue.opacity(0.25), lineWidth: 1)
+                .stroke(.blue.opacity(0.28), lineWidth: 1)
         }
-    }
-
-    private var header: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "arrow.left.arrow.right.square")
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(localized("Rewrite Integrity"))
-                    .font(.title2.weight(.semibold))
-                Text(localized("Compares Input and Result without rewriting either one"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(20)
     }
 
     private var assessmentCard: some View {

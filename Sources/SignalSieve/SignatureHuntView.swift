@@ -15,8 +15,42 @@ struct SignatureHuntView: View {
     @State private var confirmsNeutralization = false
 
     var body: some View {
+        SheetScaffold(
+            title: localized("Signature Hunt"),
+            subtitle: localized("Find repeated invisible signatures, preview changes, neutralize, and verify"),
+            systemImage: "scope",
+            doneTitle: localized("Done"),
+            onDone: { dismiss() },
+            footerNote: localized("Only deterministic safe signatures are eligible. Review-only findings remain unchanged."),
+            content: { huntContent },
+            footer: {
+                Button(localized("Neutralize Safe Signatures…"), systemImage: "shield.checkered") {
+                    confirmsNeutralization = true
+                }
+                .sieveSheetButton(.primary)
+                .disabled(isNeutralizationBlocked)
+            }
+        )
+        .frame(minWidth: 960, minHeight: 720)
+        .confirmationDialog(
+            localized("Neutralize all safe signatures?"),
+            isPresented: $confirmsNeutralization,
+            titleVisibility: .visible
+        ) {
+            Button(localized("Create Backup and Neutralize")) { neutralize() }
+            Button(localized("Cancel"), role: .cancel) {}
+        } message: {
+            Text(localized("Every affected file is backed up first. Review-only signatures, binaries, cryptographic signatures, and files changed since scanning remain untouched."))
+        }
+    }
+
+    private var isNeutralizationBlocked: Bool {
+        guard let report, !isWorking else { return true }
+        return report.safeGroupCount == 0 || report.vaccineReport.isSignalSieveTarget
+    }
+
+    private var huntContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            header
             folderControls
             safetyBanner
 
@@ -42,7 +76,6 @@ struct SignatureHuntView: View {
                     .foregroundStyle(.red)
                 }
                 signatureList(report)
-                actionBar(report)
             } else {
                 emptyState
             }
@@ -51,37 +84,12 @@ struct SignatureHuntView: View {
                 verificationBanner(result)
             }
         }
-        .padding(20)
-        .frame(minWidth: 940, minHeight: 700)
-        .confirmationDialog(
-            localized("Neutralize all safe signatures?"),
-            isPresented: $confirmsNeutralization,
-            titleVisibility: .visible
-        ) {
-            Button(localized("Create Backup and Neutralize")) { neutralize() }
-            Button(localized("Cancel"), role: .cancel) {}
-        } message: {
-            Text(localized("Every affected file is backed up first. Review-only signatures, binaries, cryptographic signatures, and files changed since scanning remain untouched."))
-        }
-    }
-
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                Label(localized("Signature Hunt"), systemImage: "scope")
-                    .font(.title2.weight(.semibold))
-                Text(localized("Find repeated invisible signatures, preview changes, neutralize, and verify"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button(localized("Done")) { dismiss() }
-        }
     }
 
     private var folderControls: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 9) {
             Button(localized("Choose Folder…"), systemImage: "folder", action: chooseFolder)
+                .sieveSheetButton()
             if let rootURL {
                 Text(rootURL.path)
                     .font(.caption.monospaced())
@@ -92,13 +100,15 @@ struct SignatureHuntView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
+            Spacer(minLength: 8)
             if let report, !report.groups.isEmpty {
                 Button(localized("Copy Signatures"), systemImage: "doc.on.doc") {
                     onCopy(FindingReportFormatter.signatureReport(report, language: language))
                 }
+                .sieveSheetButton()
             }
             Button(localized("Hunt"), systemImage: "scope", action: scan)
+                .sieveSheetButton(.primary)
                 .disabled(rootURL == nil || isWorking)
         }
     }
@@ -130,23 +140,13 @@ struct SignatureHuntView: View {
     }
 
     private func summary(_ report: SignatureHuntReport) -> some View {
-        HStack(spacing: 14) {
-            summaryItem("Signature groups", report.groups.count, .blue)
-            summaryItem("Occurrences", report.totalOccurrenceCount, .orange)
-            summaryItem("Safe groups", report.safeGroupCount, .green)
-            summaryItem("Files scanned", report.vaccineReport.scannedFileCount, .secondary)
-            summaryItem("Ignored paths", report.vaccineReport.ignoredPathCount, .secondary)
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 8) {
+            SheetStatTile(value: "\(report.groups.count)", label: localized("Signature groups"))
+            SheetStatTile(value: "\(report.totalOccurrenceCount)", label: localized("Occurrences"))
+            SheetStatTile(value: "\(report.safeGroupCount)", label: localized("Safe groups"))
+            SheetStatTile(value: "\(report.vaccineReport.scannedFileCount)", label: localized("Files scanned"))
+            SheetStatTile(value: "\(report.vaccineReport.ignoredPathCount)", label: localized("Ignored paths"))
         }
-    }
-
-    private func summaryItem(_ label: String, _ value: Int, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("\(value)")
-                .font(.title3.monospacedDigit().weight(.semibold))
-                .foregroundStyle(color)
-            Text(localized(label)).font(.caption).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func signatureList(_ report: SignatureHuntReport) -> some View {
@@ -269,24 +269,6 @@ struct SignatureHuntView: View {
             .foregroundStyle(color)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func actionBar(_ report: SignatureHuntReport) -> some View {
-        HStack {
-            Text(localized("Only deterministic safe signatures are eligible. Review-only findings remain unchanged."))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button(localized("Neutralize Safe Signatures…"), systemImage: "shield.checkered") {
-                confirmsNeutralization = true
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(
-                report.safeGroupCount == 0
-                    || report.vaccineReport.isSignalSieveTarget
-                    || isWorking
-            )
-        }
     }
 
     private func verificationBanner(_ result: SignatureNeutralizationResult) -> some View {

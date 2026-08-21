@@ -75,7 +75,18 @@ func translatesPrimaryInterfaceText() {
         "Refresh Installed Models",
         "Ollama is available, but no local models were found. Signal Sieve will not download one automatically.",
         "Ollama is installed, but its local service is not available on 127.0.0.1.",
-        "Compares Input and Result or creates an optional local rewrite without claiming semantic equivalence."
+        "Compares Input and Result or creates an optional local rewrite without claiming semantic equivalence.",
+        "Theme",
+        "Automatic",
+        "Light",
+        "Dark",
+        "Toolbar section",
+        "Inspect pasted text and control clipboard monitoring.",
+        "Local forensic tools for files, images, and the current text.",
+        "Produces reviewable output. Code is never modified automatically.",
+        "Expand Input to full width",
+        "Expand Result to full width",
+        "Restore both panels"
     ]
     for key in popupKeys {
         #expect(AppLocalization.text(key, language: .spanish) != key)
@@ -125,4 +136,27 @@ func localizesPatternReportSafely() {
         AppLocalization.patternValue(structure, language: .norwegianBokmal)
             == "Tre eller flere listeelementer"
     )
+}
+
+@Test("A fresh installation follows the system appearance")
+func defaultsToSystemThemeWithoutAStoredChoice() {
+    #expect(AppTheme.persistedOrSystem(nil) == .system)
+    #expect(AppTheme.persistedOrSystem("") == .system)
+    #expect(AppTheme.persistedOrSystem("unsupported") == .system)
+}
+
+@Test("An explicitly selected theme is restored")
+func restoresStoredThemeSelection() {
+    #expect(AppTheme.persistedOrSystem("system") == .system)
+    #expect(AppTheme.persistedOrSystem("light") == .light)
+    #expect(AppTheme.persistedOrSystem("dark") == .dark)
+}
+
+@Test("Every theme carries a translated label")
+func localizesThemeLabels() {
+    #expect(AppLocalization.text(AppTheme.system.label, language: .spanish) == "Automático")
+    #expect(AppLocalization.text(AppTheme.light.label, language: .spanish) == "Claro")
+    #expect(AppLocalization.text(AppTheme.dark.label, language: .spanish) == "Oscuro")
+    #expect(AppLocalization.text(AppTheme.system.label, language: .norwegianBokmal) == "Automatisk")
+    #expect(AppLocalization.text(AppTheme.dark.label, language: .english) == "Dark")
 }
