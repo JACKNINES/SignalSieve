@@ -20,7 +20,7 @@ Signal Sieve application.
 
 ## Current fixtures
 
-- `signal-sieve-mark.png`: the black Signal Sieve mark on a transparent
+- `signal-sieve-mark.png`: the white Signal Sieve mark on a transparent
   1,024-by-1,024 canvas, used as the README brand image without an app-icon
   tile or screenshot background.
 - `signal-sieve-overview.png`: neutral project note containing U+200B and
