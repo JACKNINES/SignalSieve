@@ -172,8 +172,8 @@ func translatesPrimaryInterfaceText() {
         "Review Link Report"
     ]
     for key in popupKeys {
-        #expect(AppLocalization.text(key, language: .spanish) != key)
-        #expect(AppLocalization.text(key, language: .norwegianBokmal) != key)
+        #expect(AppLocalization.hasTranslation(key, language: .spanish))
+        #expect(AppLocalization.hasTranslation(key, language: .norwegianBokmal))
     }
 }
 

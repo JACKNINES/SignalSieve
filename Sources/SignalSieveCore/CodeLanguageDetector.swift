@@ -95,6 +95,7 @@ public enum CodeLanguageDetector {
         Rule(language: .rust, pattern: #"(?m)^\s*(use\s+(std|crate|super)::|impl(<[^>]+>)?\s+|trait\s+\w+)"#, points: 6),
         Rule(language: .rust, pattern: #"\b(let\s+mut|Option<|Result<|Box<|Vec<|&mut\s+|match\s+[^{}\n]+\s*\{)"#, points: 4),
         Rule(language: .rust, pattern: #"\b(println|format|vec|panic|assert)!\s*\("#, points: 5),
+        Rule(language: .rust, pattern: #"\b(Some|Ok|Err)\s*\(|\bNone\s*=>"#, points: 5),
         Rule(language: .rust, pattern: #"->\s*(Self|Result<|Option<|impl\s+\w+)"#, points: 3),
 
         // Python

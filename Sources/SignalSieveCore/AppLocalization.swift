@@ -36,6 +36,15 @@ public enum AppLocalization {
         return translations[language]?[english] ?? english
     }
 
+    /// Reports whether a language carries its own entry for an English key.
+    /// Loanwords such as "URL", "Original", or "Metadata" translate to
+    /// themselves, so a present entry is the reliable signal of coverage
+    /// rather than a differing value.
+    public static func hasTranslation(_ english: String, language: AppLanguage) -> Bool {
+        guard language != .english else { return true }
+        return translations[language]?[english] != nil
+    }
+
     public static func format(
         _ englishFormat: String,
         language: AppLanguage,
