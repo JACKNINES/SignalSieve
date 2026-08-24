@@ -2,10 +2,16 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
+
+# Supersede an in-flight run when a newer commit arrives on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -25,6 +31,16 @@ jobs:
         # preserves every diagnostic and prevents multi-primary compilation
         # from amplifying frontend regressions in the SwiftUI target.
         run: swift build -Xswiftc -warnings-as-errors -Xswiftc -disable-batch-mode
+
+      # Keyed on the bootstrap script because it carries the pinned qpdf and
+      # libjpeg-turbo revisions: changing a pin changes the key and rebuilds.
+      # No restore-keys on purpose, since a partial hit would restore sources
+      # at the wrong revision and the bootstrap script refuses those.
+      - name: Cache pinned PDF dependencies
+        uses: actions/cache@v4
+        with:
+          path: .build/vendor
+          key: pdf-vendor-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bootstrap-pdf-tools.sh') }}
 
       - name: Build pinned PDF dependencies
         run: ./bootstrap-pdf-tools.sh
