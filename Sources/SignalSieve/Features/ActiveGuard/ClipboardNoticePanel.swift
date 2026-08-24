@@ -429,32 +429,26 @@ private struct ClipboardNoticeView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text(localized("Copying Settings"))
                     .font(.caption.weight(.semibold))
-                Toggle(
-                    localized("Stop showing green and yellow alerts"),
-                    isOn: Binding(
-                        get: { selectedAlertVisibility == .hideGreenAndYellow },
-                        set: { newValue in
-                            selectedAlertVisibility = newValue ? .hideGreenAndYellow : .showAll
-                            onSetAlertVisibility(selectedAlertVisibility)
-                        }
-                    )
-                )
-                .toggleStyle(.checkbox)
-                .font(.caption)
-                .help(localized("Orange and red alerts remain visible. Red alerts cannot be disabled."))
-                Toggle(
-                    localized("Stop showing green through orange alerts"),
-                    isOn: Binding(
-                        get: { selectedAlertVisibility == .redOnly },
-                        set: { newValue in
-                            selectedAlertVisibility = newValue ? .redOnly : .showAll
-                            onSetAlertVisibility(selectedAlertVisibility)
-                        }
-                    )
-                )
-                .toggleStyle(.checkbox)
-                .font(.caption)
-                .help(localized("Only red alerts remain visible. Red alerts cannot be disabled."))
+                settingsCheckbox(
+                    isSelected: selectedAlertVisibility == .hideGreenAndYellow,
+                    label: "Stop showing green and yellow alerts",
+                    help: "Orange and red alerts remain visible. Red alerts cannot be disabled."
+                ) {
+                    selectedAlertVisibility = selectedAlertVisibility == .hideGreenAndYellow
+                        ? .showAll
+                        : .hideGreenAndYellow
+                    onSetAlertVisibility(selectedAlertVisibility)
+                }
+                settingsCheckbox(
+                    isSelected: selectedAlertVisibility == .redOnly,
+                    label: "Stop showing green through orange alerts",
+                    help: "Only red alerts remain visible. Red alerts cannot be disabled."
+                ) {
+                    selectedAlertVisibility = selectedAlertVisibility == .redOnly
+                        ? .showAll
+                        : .redOnly
+                    onSetAlertVisibility(selectedAlertVisibility)
+                }
                 Text(localized("Alert visibility choices are mutually exclusive."))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -665,16 +659,35 @@ private struct ClipboardNoticeView: View {
         label: String,
         help: String
     ) -> some View {
-        Toggle(localized(label), isOn: Binding(
-            get: { selectedProtocol == value },
-            set: { isSelected in
-                selectedProtocol = isSelected ? value : .reviewAll
-                onSetClipboardProtocol(selectedProtocol)
+        settingsCheckbox(
+            isSelected: selectedProtocol == value,
+            label: label,
+            help: help
+        ) {
+            selectedProtocol = selectedProtocol == value ? .reviewAll : value
+            onSetClipboardProtocol(selectedProtocol)
+        }
+    }
+
+    private func settingsCheckbox(
+        isSelected: Bool,
+        label: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                Text(localized(label))
+                Spacer(minLength: 0)
             }
-        ))
-        .toggleStyle(.checkbox)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
         .font(.caption)
         .help(localized(help))
+        .accessibilityValue(isSelected ? "On" : "Off")
     }
 
     private func localized(_ english: String) -> String {

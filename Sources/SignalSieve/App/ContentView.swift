@@ -392,29 +392,23 @@ struct ContentView: View {
         Menu {
             Toggle(
                 model.localized("Stop showing green and yellow alerts"),
-                isOn: Binding(
-                    get: { model.hidesGreenAndYellowAlerts },
-                    set: model.setHidesGreenAndYellowAlerts
-                )
+                isOn: $model.hidesGreenAndYellowAlerts
             )
             Text(model.localized("Orange and red alerts remain visible. Red alerts cannot be disabled."))
             Toggle(
                 model.localized("Stop showing green through orange alerts"),
-                isOn: Binding(
-                    get: { model.hidesGreenThroughOrangeAlerts },
-                    set: model.setHidesGreenThroughOrangeAlerts
-                )
+                isOn: $model.hidesGreenThroughOrangeAlerts
             )
             Text(model.localized("Only red alerts remain visible. Red alerts cannot be disabled."))
             Text(model.localized("Alert visibility choices are mutually exclusive."))
             Divider()
             Toggle(
                 model.localized("Automatically use Safe Clean for copied text"),
-                isOn: clipboardProtocolBinding(.safeClean)
+                isOn: $model.usesAutomaticSafeClean
             )
             Toggle(
                 model.localized("Automatically use Strict Clean for copied text"),
-                isOn: clipboardProtocolBinding(.strictClean)
+                isOn: $model.usesAutomaticStrictClean
             )
             Divider()
             Text(model.formatted(
@@ -947,15 +941,6 @@ struct ContentView: View {
 
     private func legendItem(level: HiddenElementRiskLevel) -> some View {
         legendItem(label: AppLocalization.riskLabel(level, language: model.language), color: level.color)
-    }
-
-    private func clipboardProtocolBinding(
-        _ selection: ClipboardAutomationProtocol
-    ) -> Binding<Bool> {
-        Binding(
-            get: { model.clipboardAutomationProtocol == selection },
-            set: { model.setClipboardProtocolOption(selection, isSelected: $0) }
-        )
     }
 
     private var clipboardProtocolName: String {

@@ -119,11 +119,24 @@ final class SignalSieveViewModel: ObservableObject {
     }
 
     var adaptiveModelSampleCount: Int { adaptiveCopyModel.sampleCount }
+    // Expose writable key paths for SwiftUI instead of constructing custom
+    // actor-isolated Binding closures in ContentView. Besides being simpler,
+    // this avoids a Swift 6.1.2 IRGen crash in its Bool-setter thunk.
     var hidesGreenAndYellowAlerts: Bool {
-        clipboardAlertVisibility == .hideGreenAndYellow
+        get { clipboardAlertVisibility == .hideGreenAndYellow }
+        set { setHidesGreenAndYellowAlerts(newValue) }
     }
     var hidesGreenThroughOrangeAlerts: Bool {
-        clipboardAlertVisibility == .redOnly
+        get { clipboardAlertVisibility == .redOnly }
+        set { setHidesGreenThroughOrangeAlerts(newValue) }
+    }
+    var usesAutomaticSafeClean: Bool {
+        get { clipboardAutomationProtocol == .safeClean }
+        set { setClipboardProtocolOption(.safeClean, isSelected: newValue) }
+    }
+    var usesAutomaticStrictClean: Bool {
+        get { clipboardAutomationProtocol == .strictClean }
+        set { setClipboardProtocolOption(.strictClean, isSelected: newValue) }
     }
 
     var activeGuardLabel: String {

@@ -21,10 +21,9 @@ jobs:
         run: swift --version
 
       - name: Build with warnings as errors
-        # Xcode 16.4's Swift 6.1.2 frontend can abort in IRGen when SwiftPM
-        # batches several SwiftUI primary files into one frontend invocation.
-        # Single-file mode preserves every diagnostic while avoiding that
-        # compiler path.
+        # Keep Xcode 16.4's Swift 6.1.2 frontend in single-primary mode. This
+        # preserves every diagnostic and prevents multi-primary compilation
+        # from amplifying frontend regressions in the SwiftUI target.
         run: swift build -Xswiftc -warnings-as-errors -Xswiftc -disable-batch-mode
 
       - name: Build pinned PDF dependencies
