@@ -180,9 +180,12 @@ public enum VaccineEngine {
 
         let packagingInfoURL = root.appendingPathComponent("Packaging/Info.plist")
         let packageURL = root.appendingPathComponent("Package.swift")
-        let appSourceURL = root.appendingPathComponent("Sources/SignalSieve/SignalSieveApp.swift")
+        let appSourceURLs = [
+            root.appendingPathComponent("Sources/SignalSieve/App/SignalSieveApp.swift"),
+            root.appendingPathComponent("Sources/SignalSieve/SignalSieveApp.swift")
+        ]
         guard bundleIdentifier(at: packagingInfoURL) == "com.signalsieve.app",
-              FileManager.default.fileExists(atPath: appSourceURL.path),
+              appSourceURLs.contains(where: { FileManager.default.fileExists(atPath: $0.path) }),
               let packageText = try? String(contentsOf: packageURL, encoding: .utf8) else {
             return false
         }

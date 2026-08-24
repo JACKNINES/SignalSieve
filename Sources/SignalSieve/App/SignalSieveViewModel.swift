@@ -12,13 +12,23 @@ final class SignalSieveViewModel: ObservableObject {
     @Published var showsFileProvenance = false
     @Published private(set) var pendingClipboardImage: ClipboardImagePayload?
     @Published private(set) var inspection = HiddenTextAnalyzer.inspect("")
+    @Published private(set) var covertChannelReport = CovertTextChannelAnalyzer.analyze("")
     @Published private(set) var codeAnalysis = CodeGuardAnalyzer.analyze("")
     @Published private(set) var binaryAnalysis = BinaryContentDetector.analyze("")
+    @Published private(set) var identifierAnalysis = OpaqueIdentifierAnalyzer.analyze("")
+    @Published private(set) var scamAnalysis = ScamAttemptDetector.analyze("")
+    @Published private(set) var adaptiveAnalysis = AdaptiveCopyAnalysis(
+        sampleCountBeforeLearning: 0,
+        anomalyScore: 0,
+        deviations: [],
+        wasEligibleForLearning: false
+    )
     @Published private(set) var watermarkProbeReport = WatermarkProbeAnalyzer.analyze("")
     @Published private(set) var rewriteIntegrityReport = RewriteIntegrityAnalyzer.analyze(
         original: "",
         candidate: ""
     )
+    @Published private(set) var linkCleaningReport = URLTrackerCleaner.cleanLinks(in: "")
     @Published private(set) var revealedFragments: [RevealedInvisibleFragment] = []
     @Published private(set) var status = "Paste text to get started."
     @Published private(set) var isProcessing = false
@@ -61,36 +71,79 @@ final class SignalSieveViewModel: ObservableObject {
     @Published var warnsAboutFileMetadata: Bool {
         didSet { defaults.set(warnsAboutFileMetadata, forKey: PreferenceKey.fileMetadataWarnings) }
     }
+    @Published var warnsAboutOpaqueIdentifiers: Bool {
+        didSet { defaults.set(warnsAboutOpaqueIdentifiers, forKey: PreferenceKey.identifierWarnings) }
+    }
+    @Published var warnsAboutScamAttempts: Bool {
+        didSet { defaults.set(warnsAboutScamAttempts, forKey: PreferenceKey.scamWarnings) }
+    }
+    @Published var isAdaptiveModelEnabled: Bool {
+        didSet { defaults.set(isAdaptiveModelEnabled, forKey: PreferenceKey.adaptiveModelEnabled) }
+    }
+    @Published var clipboardAlertVisibility: ClipboardAlertVisibility {
+        didSet {
+            defaults.set(
+                clipboardAlertVisibility.rawValue,
+                forKey: PreferenceKey.clipboardAlertVisibility
+            )
+        }
+    }
+    @Published var clipboardAutomationProtocol: ClipboardAutomationProtocol {
+        didSet {
+            defaults.set(
+                clipboardAutomationProtocol.rawValue,
+                forKey: PreferenceKey.clipboardAutomationProtocol
+            )
+        }
+    }
     @Published var automaticallyCleansLinks: Bool {
         didSet { defaults.set(automaticallyCleansLinks, forKey: PreferenceKey.automaticLinkCleaning) }
     }
 
     private let privateRulesURL: URL
+    private let adaptiveModelURL: URL
     private let defaults: UserDefaults
     private let noticePanel = ClipboardNoticePanelController()
     private var clipboardMonitor: AnyCancellable?
     private var lastPasteboardChangeCount = NSPasteboard.general.changeCount
     private var openMainWindow: (() -> Void)?
+    private var adaptiveCopyModel: AdaptiveCopyModel
 
     var patternSampleCount: Int { patternTexts.count }
     var clipboardHistoryCount: Int { clipboardHistory.count }
     var privateRuleCount: Int { privateRules.count }
     var enabledWarningCount: Int {
-        [warnsAboutHiddenUnicode, warnsAboutTrackedLinks, warnsAboutPatterns, warnsAboutCodeRisks, warnsAboutBinaryContent, warnsAboutFileMetadata]
+        [warnsAboutHiddenUnicode, warnsAboutTrackedLinks, warnsAboutPatterns, warnsAboutCodeRisks, warnsAboutBinaryContent, warnsAboutFileMetadata, warnsAboutOpaqueIdentifiers, warnsAboutScamAttempts, isAdaptiveModelEnabled]
             .filter { $0 }
             .count
     }
 
-    var activeGuardLabel: String {
-        guard isActiveProtectionEnabled else { return localized("Active Guard Off") }
-        guard enabledWarningCount < 6 else { return localized("Active Guard On") }
-        return formatted("Active Guard · %d/6 warnings", enabledWarningCount)
+    var adaptiveModelSampleCount: Int { adaptiveCopyModel.sampleCount }
+    var hidesGreenAndYellowAlerts: Bool {
+        clipboardAlertVisibility == .hideGreenAndYellow
+    }
+    var hidesGreenThroughOrangeAlerts: Bool {
+        clipboardAlertVisibility == .redOnly
     }
 
-    init(privateRulesURL: URL? = nil, defaults: UserDefaults = .standard) {
+    var activeGuardLabel: String {
+        guard isActiveProtectionEnabled else { return localized("Active Guard Off") }
+        guard enabledWarningCount < 9 else { return localized("Active Guard On") }
+        return formatted("Active Guard · %d/9 warnings", enabledWarningCount)
+    }
+
+    init(
+        privateRulesURL: URL? = nil,
+        adaptiveModelURL: URL? = nil,
+        defaults: UserDefaults = .standard
+    ) {
         Self.migrateLegacyExecutablePreferencesIfNeeded(to: defaults)
         let resolvedURL = privateRulesURL ?? Self.defaultPrivateRulesURL()
         self.privateRulesURL = resolvedURL
+        let resolvedAdaptiveURL = adaptiveModelURL ?? Self.defaultAdaptiveModelURL()
+        self.adaptiveModelURL = resolvedAdaptiveURL
+        self.adaptiveCopyModel = (try? AdaptiveCopyModelStore.load(from: resolvedAdaptiveURL))
+            ?? AdaptiveCopyModel()
         self.defaults = defaults
         self.language = AppLanguage.persistedOrEnglish(
             defaults.string(forKey: PreferenceKey.language)
@@ -133,6 +186,36 @@ final class SignalSieveViewModel: ObservableObject {
             defaults: defaults,
             fallback: true
         )
+        self.warnsAboutOpaqueIdentifiers = Self.storedBool(
+            PreferenceKey.identifierWarnings,
+            defaults: defaults,
+            fallback: true
+        )
+        self.warnsAboutScamAttempts = Self.storedBool(
+            PreferenceKey.scamWarnings,
+            defaults: defaults,
+            fallback: true
+        )
+        self.isAdaptiveModelEnabled = Self.storedBool(
+            PreferenceKey.adaptiveModelEnabled,
+            defaults: defaults,
+            fallback: true
+        )
+        let storedClipboardProtocol = defaults.string(
+            forKey: PreferenceKey.clipboardAutomationProtocol
+        )
+        let legacyHidesGreenAndYellow = Self.storedBool(
+            PreferenceKey.hidesGreenAndYellowAlerts,
+            defaults: defaults,
+            fallback: storedClipboardProtocol == "high-risk-only"
+                || storedClipboardProtocol == ClipboardAutomationProtocol.safeClean.rawValue
+                || storedClipboardProtocol == ClipboardAutomationProtocol.strictClean.rawValue
+        )
+        self.clipboardAlertVisibility = .persistedOrShowAll(
+            defaults.string(forKey: PreferenceKey.clipboardAlertVisibility),
+            legacyHidesGreenAndYellow: legacyHidesGreenAndYellow
+        )
+        self.clipboardAutomationProtocol = .persistedOrReviewAll(storedClipboardProtocol)
         self.automaticallyCleansLinks = Self.storedBool(
             PreferenceKey.automaticLinkCleaning,
             defaults: defaults,
@@ -176,11 +259,28 @@ final class SignalSieveViewModel: ObservableObject {
 
     func inspect() {
         inspection = HiddenTextAnalyzer.inspect(input)
+        covertChannelReport = CovertTextChannelAnalyzer.analyze(input)
         codeAnalysis = CodeGuardAnalyzer.analyze(input)
         binaryAnalysis = BinaryContentDetector.analyze(input)
+        identifierAnalysis = OpaqueIdentifierAnalyzer.analyze(input)
+        scamAnalysis = ScamAttemptDetector.analyze(input)
+        linkCleaningReport = URLTrackerCleaner.cleanLinks(in: input, customRules: privateRules)
+        adaptiveAnalysis = isAdaptiveModelEnabled
+            ? adaptiveCopyModel.assess(input)
+            : AdaptiveCopyAnalysis(
+                sampleCountBeforeLearning: adaptiveCopyModel.sampleCount,
+                anomalyScore: 0,
+                deviations: [],
+                wasEligibleForLearning: false
+            )
         revealedFragments = InvisibleFragmentRevealer.reveal(in: input)
         if input.isEmpty {
             status = localized("Paste text to get started.")
+        } else if scamAnalysis.isPotentialScam {
+            status = formatted(
+                "Possible scam attempt · %d explainable signal(s) found.",
+                scamAnalysis.signals.count
+            )
         } else if codeAnalysis.hasRisks {
             status = codeAnalysis.languageDetection.primary == nil
                 ? formatted(
@@ -204,6 +304,11 @@ final class SignalSieveViewModel: ObservableObject {
                     "%@ code detected. No known source-code Unicode risks found.",
                     codeAnalysis.detectedLanguage
                 )
+        } else if covertChannelReport.hasSuspiciousChannel {
+            status = formatted(
+                "Found %d patterned covert channel(s) to review.",
+                covertChannelReport.findings.count
+            )
         } else if inspection.findings.isEmpty {
             status = localized("No known hidden Unicode elements were found.")
         } else if inspection.isClean {
@@ -225,15 +330,28 @@ final class SignalSieveViewModel: ObservableObject {
 
     func cleanLinks() {
         let result = URLTrackerCleaner.cleanLinks(in: input, customRules: privateRules)
+        linkCleaningReport = result
         output = result.text
 
-        switch (result.linksFound, result.linksChanged) {
-        case (0, _):
+        switch (result.linksFound, result.linksChanged, result.unresolvedRedirectCount) {
+        case (0, _, _):
             status = localized("No HTTP or HTTPS links were found.")
-        case (_, 0):
+        case (_, 0, let unresolved) where unresolved > 0:
+            status = formatted(
+                "Detected %d opaque redirect(s); Signal Sieve did not contact them or claim a destination.",
+                unresolved
+            )
+        case (_, 0, _):
             status = formatted(
                 "Found %d links, but none contained known tracking parameters.",
                 result.linksFound
+            )
+        case (_, _, let unresolved) where unresolved > 0:
+            status = formatted(
+                "Cleaned %d links, removed %d tracking parameters, and left %d opaque redirect(s) unresolved offline.",
+                result.linksChanged,
+                result.removedParameterCount,
+                unresolved
             )
         default:
             status = formatted(
@@ -339,7 +457,22 @@ final class SignalSieveViewModel: ObservableObject {
         warnsAboutCodeRisks = true
         warnsAboutBinaryContent = true
         warnsAboutFileMetadata = true
+        warnsAboutOpaqueIdentifiers = true
+        warnsAboutScamAttempts = true
+        isAdaptiveModelEnabled = true
         status = localized("All Active Guard warning types are enabled.")
+    }
+
+    func clearAdaptiveModel() {
+        adaptiveCopyModel = AdaptiveCopyModel()
+        adaptiveAnalysis = AdaptiveCopyAnalysis(
+            sampleCountBeforeLearning: 0,
+            anomalyScore: 0,
+            deviations: [],
+            wasEligibleForLearning: false
+        )
+        try? AdaptiveCopyModelStore.save(adaptiveCopyModel, to: adaptiveModelURL)
+        status = localized("Learned copy patterns were forgotten. No copied text had been stored.")
     }
 
     func clearPatternMemory() {
@@ -441,6 +574,11 @@ final class SignalSieveViewModel: ObservableObject {
         status = localized("Active Guard is monitoring new clipboard content locally.")
     }
 
+    func ensureClipboardMonitoringIsRunning() {
+        guard isActiveProtectionEnabled else { return }
+        startClipboardMonitoring()
+    }
+
     private func stopClipboardMonitoring() {
         clipboardMonitor?.cancel()
         clipboardMonitor = nil
@@ -465,7 +603,7 @@ final class SignalSieveViewModel: ObservableObject {
         guard !copiedText.isEmpty || fileMetadataAlert else { return }
 
         if copiedText.isEmpty {
-            present(ClipboardNotice(
+            let notice = ClipboardNotice(
                 clipboardText: "",
                 hiddenUnicodeCount: 0,
                 hiddenUnicodeRiskLevel: nil,
@@ -478,26 +616,76 @@ final class SignalSieveViewModel: ObservableObject {
                 trackedLinkCount: 0,
                 removedParameterCount: 0,
                 patternReport: PatternReport(sampleCount: 0, findings: []),
+                identifierAnalysis: OpaqueIdentifierAnalysis(findings: []),
+                scamAnalysis: ScamAttemptDetector.analyze(""),
+                adaptiveAnalysis: AdaptiveCopyAnalysis(
+                    sampleCountBeforeLearning: adaptiveCopyModel.sampleCount,
+                    anomalyScore: 0,
+                    deviations: [],
+                    wasEligibleForLearning: false
+                ),
                 clipboardContentKinds: typeInventory.kinds,
-                pasteboardChangeCount: pasteboard.changeCount
-            ))
+                pasteboardChangeCount: pasteboard.changeCount,
+                automaticCleaningAudit: nil
+            )
+            if ClipboardAlertVisibilityPolicy.shouldPresent(
+                notice.priority,
+                visibility: clipboardAlertVisibility
+            ) {
+                present(notice)
+            }
             return
         }
 
         let copiedCodeAnalysis = CodeGuardAnalyzer.analyze(copiedText)
         let initialLinkCleaning = URLTrackerCleaner.cleanLinks(in: copiedText, customRules: privateRules)
         var effectiveText = copiedText
-        var automaticallyCleaned = false
+        let hasNonTextRepresentation = typeInventory.kinds.contains(.image)
+            || typeInventory.kinds.contains(.fileURL)
+        let isPrivacySensitive = !shouldStoreInHistory
 
+        let mayRewritePlainText = !copiedCodeAnalysis.isLikelyCode
+            && !hasNonTextRepresentation
+            && !isPrivacySensitive
+
+        var linkWasPreparedForAutomaticCleaning = false
         if automaticallyCleansLinks,
-           !copiedCodeAnalysis.isLikelyCode,
+           mayRewritePlainText,
            initialLinkCleaning.linksChanged > 0 {
+            effectiveText = initialLinkCleaning.text
+            linkWasPreparedForAutomaticCleaning = true
+        }
+
+        let automationResult = ClipboardAutomationPolicy.transform(
+            effectiveText,
+            using: clipboardAutomationProtocol,
+            isLikelyCode: copiedCodeAnalysis.isLikelyCode,
+            hasNonTextRepresentation: hasNonTextRepresentation,
+            isPrivacySensitive: isPrivacySensitive
+        )
+        effectiveText = automationResult.text
+
+        var automaticallyCleaned = false
+        var automaticTextCleaningApplied = false
+        if effectiveText != copiedText {
             automaticallyCleaned = replaceClipboard(
                 expectedText: copiedText,
-                replacement: initialLinkCleaning.text
+                replacement: effectiveText
             )
-            if automaticallyCleaned {
-                effectiveText = initialLinkCleaning.text
+            if !automaticallyCleaned {
+                effectiveText = copiedText
+            } else if automationResult.didChange {
+                automaticTextCleaningApplied = true
+                status = formatted(
+                    "%@ automatically cleaned this copy: removed %d and replaced %d element(s).",
+                    AppLocalization.text(
+                        clipboardAutomationProtocol == .strictClean ? "Strict Clean" : "Safe Clean",
+                        language: language
+                    ),
+                    automationResult.removedCount,
+                    automationResult.replacedCount
+                )
+            } else if linkWasPreparedForAutomaticCleaning {
                 status = formatted(
                     "Active Guard automatically cleaned %d copied link(s).",
                     initialLinkCleaning.linksChanged
@@ -507,15 +695,62 @@ final class SignalSieveViewModel: ObservableObject {
                   copiedCodeAnalysis.isLikelyCode,
                   initialLinkCleaning.linksChanged > 0 {
             status = localized("Code detected. Automatic link cleaning was skipped so source code was not modified.")
+        } else if let skipReason = automationResult.skipReason,
+                  clipboardAutomationProtocol.cleaningMode != nil {
+            status = localizedClipboardAutomationSkip(skipReason)
         }
 
+        // Detection and alert priority use the original copy. Automatic
+        // cleaning must never erase the evidence that decides whether a red
+        // warning remains mandatory.
         let analysis = ClipboardProtectionAnalyzer.analyze(
-            effectiveText,
+            copiedText,
             recentPatternTexts: patternTexts,
             customRules: privateRules
         )
+        let finalClipboardAnalysis = effectiveText == copiedText
+            ? analysis
+            : ClipboardProtectionAnalyzer.analyze(
+                effectiveText,
+                recentPatternTexts: [],
+                customRules: privateRules
+            )
+        let finalLinkCleaning = effectiveText == copiedText
+            ? initialLinkCleaning
+            : URLTrackerCleaner.cleanLinks(in: effectiveText, customRules: privateRules)
+        let automaticCleaningAudit = clipboardAutomationProtocol.cleaningMode.map { mode in
+            ClipboardAutomaticCleaningAudit(
+                mode: mode,
+                didWriteCleanedText: automaticTextCleaningApplied,
+                removedElementCount: automationResult.removedCount,
+                replacedElementCount: automationResult.replacedCount,
+                originalAlertCount: Self.automaticTextAlertCount(in: analysis),
+                remainingAlertCount: Self.automaticTextAlertCount(in: finalClipboardAnalysis),
+                originalPriority: Self.automaticTextPriority(in: analysis),
+                remainingPriority: Self.automaticTextPriority(in: finalClipboardAnalysis),
+                skipReason: automationResult.skipReason
+            )
+        }
         patternTexts = analysis.updatedPatternTexts
         patternReport = PatternAnalyzer.analyze(patternTexts)
+        identifierAnalysis = analysis.identifierAnalysis
+        scamAnalysis = analysis.scamAnalysis
+
+        if isAdaptiveModelEnabled, shouldStoreInHistory {
+            adaptiveAnalysis = adaptiveCopyModel.evaluateAndLearn(copiedText)
+            do {
+                try AdaptiveCopyModelStore.save(adaptiveCopyModel, to: adaptiveModelURL)
+            } catch {
+                status = localized("Usual copy patterns could not save their numerical measurements.")
+            }
+        } else {
+            adaptiveAnalysis = AdaptiveCopyAnalysis(
+                sampleCountBeforeLearning: adaptiveCopyModel.sampleCount,
+                anomalyScore: 0,
+                deviations: [],
+                wasEligibleForLearning: false
+            )
+        }
 
         if shouldStoreInHistory {
             let entry = ClipboardHistory.makeEntry(
@@ -523,42 +758,84 @@ final class SignalSieveViewModel: ObservableObject {
                 capturedAt: capturedAt,
                 sourceApplicationName: sourceApplication?.localizedName,
                 sourceBundleIdentifier: sourceApplication?.bundleIdentifier,
-                hiddenUnicodeCount: analysis.inspection.actionableFindings.count,
+                hiddenUnicodeCount: analysis.hiddenTextFindingCount,
                 codeRiskCount: analysis.codeAnalysis.findings.count,
-                trackedLinkCount: initialLinkCleaning.linksChanged,
+                trackedLinkCount: initialLinkCleaning.linksFlagged,
                 binaryKind: analysis.binaryAnalysis.kind,
-                wasAutomaticallyCleaned: automaticallyCleaned
+                scamSignalCount: analysis.scamAnalysis.isPotentialScam
+                    ? analysis.scamAnalysis.signals.count
+                    : 0,
+                scamThreatLevel: analysis.scamAnalysis.isPotentialScam
+                    ? analysis.scamAnalysis.threatLevel
+                    : nil,
+                wasAutomaticallyCleaned: automaticallyCleaned,
+                automaticCleaningAudit: automaticCleaningAudit
             )
             clipboardHistory = ClipboardHistory.appending(entry, to: clipboardHistory)
         }
 
-        let codeRiskCount = warnsAboutCodeRisks ? analysis.codeAnalysis.findings.count : 0
+        let includesCodeWarnings = ClipboardAlertVisibilityPolicy.shouldIncludeCategory(
+            isEnabled: warnsAboutCodeRisks,
+            highestRisk: analysis.codeAnalysis.highestRiskLevel
+        )
+        let codeRiskCount = includesCodeWarnings ? analysis.codeAnalysis.findings.count : 0
         let binaryDetection = warnsAboutBinaryContent
             ? analysis.binaryAnalysis
             : BinaryContentAnalysis(kind: nil)
-        let rawHiddenCount = warnsAboutHiddenUnicode ? analysis.inspection.actionableFindings.count : 0
-        let hiddenCount = codeRiskCount > 0 ? 0 : rawHiddenCount
-        let trackedLinkCount = warnsAboutTrackedLinks && !automaticallyCleaned
-            ? initialLinkCleaning.linksChanged
+        let includesHiddenWarnings = ClipboardAlertVisibilityPolicy.shouldIncludeCategory(
+            isEnabled: warnsAboutHiddenUnicode,
+            highestRisk: analysis.hiddenTextRiskLevel
+        )
+        let rawHiddenCount = includesHiddenWarnings
+            ? analysis.hiddenTextFindingCount
+            : 0
+        let hiddenCount = codeRiskCount > 0 && analysis.hiddenTextRiskLevel != .high
+            ? 0
+            : rawHiddenCount
+        let trackedLinkCount = warnsAboutTrackedLinks
+            ? finalLinkCleaning.linksFlagged
             : 0
         let alertPatternReport = warnsAboutPatterns && analysis.containsRecentPattern
             ? analysis.recentPatternReport
             : PatternReport(sampleCount: 0, findings: [])
+        let alertIdentifierAnalysis = warnsAboutOpaqueIdentifiers
+            ? analysis.identifierAnalysis
+            : OpaqueIdentifierAnalysis(findings: [])
+        let includesScamWarnings = ClipboardAlertVisibilityPolicy.shouldIncludeScamCategory(
+            isEnabled: warnsAboutScamAttempts,
+            threatLevel: analysis.scamAnalysis.isPotentialScam
+                ? analysis.scamAnalysis.threatLevel
+                : nil
+        )
+        let alertScamAnalysis = includesScamWarnings
+            ? analysis.scamAnalysis
+            : ScamAttemptDetector.analyze("")
+        let alertAdaptiveAnalysis = isAdaptiveModelEnabled
+            ? adaptiveAnalysis
+            : AdaptiveCopyAnalysis(
+                sampleCountBeforeLearning: adaptiveCopyModel.sampleCount,
+                anomalyScore: 0,
+                deviations: [],
+                wasEligibleForLearning: false
+            )
 
         guard hiddenCount > 0
                 || codeRiskCount > 0
                 || binaryDetection.isDetected
                 || trackedLinkCount > 0
                 || alertPatternReport.hasSuspiciousRepetition
+                || alertIdentifierAnalysis.containsIdentifiers
+                || alertScamAnalysis.isPotentialScam
+                || alertAdaptiveAnalysis.isAnomalous
                 || fileMetadataAlert else {
             return
         }
 
         let notice = ClipboardNotice(
-            clipboardText: effectiveText,
+            clipboardText: copiedText,
             hiddenUnicodeCount: hiddenCount,
             hiddenUnicodeRiskLevel: hiddenCount > 0
-                ? analysis.inspection.highestRiskLevel
+                ? analysis.hiddenTextRiskLevel
                 : nil,
             codeRiskCount: codeRiskCount,
             codeRiskLevel: codeRiskCount > 0
@@ -571,9 +848,17 @@ final class SignalSieveViewModel: ObservableObject {
             trackedLinkCount: trackedLinkCount,
             removedParameterCount: trackedLinkCount > 0 ? initialLinkCleaning.removedParameterCount : 0,
             patternReport: alertPatternReport,
+            identifierAnalysis: alertIdentifierAnalysis,
+            scamAnalysis: alertScamAnalysis,
+            adaptiveAnalysis: alertAdaptiveAnalysis,
             clipboardContentKinds: fileMetadataAlert ? typeInventory.kinds : [],
-            pasteboardChangeCount: pasteboard.changeCount
+            pasteboardChangeCount: pasteboard.changeCount,
+            automaticCleaningAudit: automaticCleaningAudit
         )
+        guard ClipboardAlertVisibilityPolicy.shouldPresent(
+            notice.priority,
+            visibility: clipboardAlertVisibility
+        ) else { return }
         present(notice)
     }
 
@@ -586,8 +871,13 @@ final class SignalSieveViewModel: ObservableObject {
             onEnableAutoClean: { [weak self] in self?.enableAutomaticLinkCleaning(from: notice) },
             onShowPatterns: { [weak self] in self?.revealPatternReport() },
             onOpenFileInspector: { [weak self] in self?.revealFileProvenanceInspector(from: notice) },
-            onSetSuppressed: { [weak self] kind, isSuppressed in
-                self?.setWarning(kind, isSuppressed: isSuppressed)
+            alertVisibility: clipboardAlertVisibility,
+            onSetAlertVisibility: { [weak self] visibility in
+                self?.setClipboardAlertVisibility(visibility)
+            },
+            clipboardProtocol: clipboardAutomationProtocol,
+            onSetClipboardProtocol: { [weak self] selection in
+                self?.setClipboardAutomationProtocol(selection, applyingTo: notice)
             }
         )
     }
@@ -600,13 +890,27 @@ final class SignalSieveViewModel: ObservableObject {
     }
 
     private func cleanCopiedLinks(from notice: ClipboardNotice) {
-        let result = URLTrackerCleaner.cleanLinks(in: notice.clipboardText, customRules: privateRules)
-        guard result.linksChanged > 0 else {
-            status = localized("The copied text no longer contains known tracking parameters.")
+        let pasteboard = NSPasteboard.general
+        guard let currentText = pasteboard.string(forType: .string) else {
+            status = localized("The clipboard no longer contains text.")
             noticePanel.dismissCurrent()
             return
         }
-        if replaceClipboard(expectedText: notice.clipboardText, replacement: result.text) {
+        let result = URLTrackerCleaner.cleanLinks(in: currentText, customRules: privateRules)
+        linkCleaningReport = result
+        guard result.linksChanged > 0 else {
+            if result.unresolvedRedirectCount > 0 {
+                status = formatted(
+                    "Detected %d opaque redirect(s); Signal Sieve kept them unchanged and made no network request.",
+                    result.unresolvedRedirectCount
+                )
+            } else {
+                status = localized("The copied text no longer contains known tracking parameters.")
+            }
+            noticePanel.dismissCurrent()
+            return
+        }
+        if replaceClipboard(expectedText: currentText, replacement: result.text) {
             output = result.text
             status = formatted(
                 "Cleaned the current clipboard copy and removed %d tracking parameter(s).",
@@ -670,6 +974,115 @@ final class SignalSieveViewModel: ObservableObject {
         }
     }
 
+    func setClipboardProtocolOption(
+        _ selection: ClipboardAutomationProtocol,
+        isSelected: Bool
+    ) {
+        setClipboardAutomationProtocol(isSelected ? selection : .reviewAll)
+    }
+
+    func setHidesGreenAndYellowAlerts(_ isHidden: Bool) {
+        guard isHidden || clipboardAlertVisibility == .hideGreenAndYellow else { return }
+        setClipboardAlertVisibility(isHidden ? .hideGreenAndYellow : .showAll)
+    }
+
+    func setHidesGreenThroughOrangeAlerts(_ isHidden: Bool) {
+        guard isHidden || clipboardAlertVisibility == .redOnly else { return }
+        setClipboardAlertVisibility(isHidden ? .redOnly : .showAll)
+    }
+
+    private func setClipboardAlertVisibility(_ visibility: ClipboardAlertVisibility) {
+        clipboardAlertVisibility = visibility
+        switch visibility {
+        case .showAll:
+            status = localized("Green through orange alerts are visible. Red alerts remain mandatory.")
+        case .hideGreenAndYellow:
+            status = localized("Green and yellow alerts are hidden. Orange and red alerts remain mandatory.")
+        case .redOnly:
+            status = localized("Green through orange alerts are hidden. Only mandatory red alerts will appear.")
+        }
+    }
+
+    private func setClipboardAutomationProtocol(
+        _ selection: ClipboardAutomationProtocol,
+        applyingTo notice: ClipboardNotice? = nil
+    ) {
+        clipboardAutomationProtocol = selection
+
+        guard let mode = selection.cleaningMode else {
+            status = localized("Automatic text cleaning is off. Alert visibility is unchanged.")
+            return
+        }
+
+        guard let notice else {
+            status = localized(selection == .safeClean
+                ? "Safe Clean is now automatic for eligible future text copies. Alert visibility is unchanged."
+                : "Strict Clean is now automatic for eligible future text copies. Alert visibility is unchanged.")
+            return
+        }
+
+        applyClipboardProtocol(mode: mode, selection: selection, to: notice)
+    }
+
+    private func applyClipboardProtocol(
+        mode: CleaningMode,
+        selection: ClipboardAutomationProtocol,
+        to notice: ClipboardNotice
+    ) {
+        let pasteboard = NSPasteboard.general
+        guard pasteboard.changeCount == notice.pasteboardChangeCount,
+              let currentText = pasteboard.string(forType: .string) else {
+            status = localized("Clipboard Protocol was saved, but the current clipboard changed before cleaning.")
+            return
+        }
+
+        let typeInventory = ClipboardTypeAnalyzer.analyze(
+            typeIdentifiers: (pasteboard.types ?? []).map(\.rawValue)
+        )
+        let result = ClipboardAutomationPolicy.transform(
+            currentText,
+            using: selection,
+            isLikelyCode: CodeGuardAnalyzer.analyze(currentText).isLikelyCode,
+            hasNonTextRepresentation: typeInventory.kinds.contains(.image)
+                || typeInventory.kinds.contains(.fileURL),
+            isPrivacySensitive: !Self.shouldStoreInClipboardHistory(pasteboard)
+        )
+
+        if let skipReason = result.skipReason {
+            status = localizedClipboardAutomationSkip(skipReason)
+            return
+        }
+        guard result.didChange else {
+            status = localized(mode == .safe
+                ? "Safe Clean is automatic. The current copy needed no changes."
+                : "Strict Clean is automatic. The current copy needed no changes.")
+            return
+        }
+        guard replaceClipboard(expectedText: currentText, replacement: result.text) else {
+            status = localized("Clipboard Protocol was saved, but the current clipboard changed before cleaning.")
+            return
+        }
+        status = formatted(
+            "%@ cleaned the current copy: removed %d and replaced %d element(s).",
+            AppLocalization.text(mode == .safe ? "Safe Clean" : "Strict Clean", language: language),
+            result.removedCount,
+            result.replacedCount
+        )
+    }
+
+    private func localizedClipboardAutomationSkip(
+        _ reason: ClipboardAutomationSkipReason
+    ) -> String {
+        switch reason {
+        case .sourceCode:
+            localized("Clipboard Protocol was saved. Automatic text cleaning skipped source code.")
+        case .nonTextRepresentation:
+            localized("Clipboard Protocol was saved. Automatic text cleaning skipped a file or image representation.")
+        case .privacySensitiveClipboard:
+            localized("Clipboard Protocol was saved. Automatic text cleaning skipped privacy-sensitive clipboard content.")
+        }
+    }
+
     private func setWarning(_ kind: ClipboardWarningKind, isSuppressed: Bool) {
         switch kind {
         case .hiddenUnicode: warnsAboutHiddenUnicode = !isSuppressed
@@ -678,6 +1091,9 @@ final class SignalSieveViewModel: ObservableObject {
         case .fileMetadata: warnsAboutFileMetadata = !isSuppressed
         case .trackedLink: warnsAboutTrackedLinks = !isSuppressed
         case .repeatedPattern: warnsAboutPatterns = !isSuppressed
+        case .opaqueIdentifier: warnsAboutOpaqueIdentifiers = !isSuppressed
+        case .scamAttempt: warnsAboutScamAttempts = !isSuppressed
+        case .adaptiveAnomaly: isAdaptiveModelEnabled = !isSuppressed
         }
         status = isSuppressed
             ? formatted(
@@ -703,6 +1119,26 @@ final class SignalSieveViewModel: ObservableObject {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
         lastPasteboardChangeCount = pasteboard.changeCount
+    }
+
+    private static func automaticTextAlertCount(
+        in analysis: ClipboardProtectionAnalysis
+    ) -> Int {
+        analysis.hiddenTextFindingCount
+            + analysis.codeAnalysis.findings.count
+            + (analysis.scamAnalysis.isPotentialScam ? analysis.scamAnalysis.signals.count : 0)
+    }
+
+    private static func automaticTextPriority(
+        in analysis: ClipboardProtectionAnalysis
+    ) -> ClipboardAlertPriority {
+        ClipboardProtectionAnalyzer.alertPriority(
+            hiddenUnicodeRisk: analysis.hiddenTextRiskLevel,
+            codeRisk: analysis.codeAnalysis.highestRiskLevel,
+            scamThreat: analysis.scamAnalysis.isPotentialScam
+                ? analysis.scamAnalysis.threatLevel
+                : nil
+        )
     }
 
     private static func shouldStoreInClipboardHistory(_ pasteboard: NSPasteboard) -> Bool {
@@ -748,6 +1184,16 @@ final class SignalSieveViewModel: ObservableObject {
         privateRulesURL(applicationName: "SignalSieve")
     }
 
+    private static func defaultAdaptiveModelURL() -> URL {
+        let applicationSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.homeDirectoryForCurrentUser
+        return applicationSupport
+            .appendingPathComponent("SignalSieve", isDirectory: true)
+            .appendingPathComponent("adaptive-copy-model.json")
+    }
+
     private static func legacyPrivateRulesURL() -> URL {
         privateRulesURL(applicationName: "TextScrub")
     }
@@ -788,6 +1234,12 @@ final class SignalSieveViewModel: ObservableObject {
             PreferenceKey.trackedLinkWarnings,
             PreferenceKey.patternWarnings,
             PreferenceKey.fileMetadataWarnings,
+            PreferenceKey.identifierWarnings,
+            PreferenceKey.scamWarnings,
+            PreferenceKey.adaptiveModelEnabled,
+            PreferenceKey.clipboardAlertVisibility,
+            PreferenceKey.hidesGreenAndYellowAlerts,
+            PreferenceKey.clipboardAutomationProtocol,
             PreferenceKey.automaticLinkCleaning,
             PreferenceKey.language
         ]
@@ -829,6 +1281,12 @@ final class SignalSieveViewModel: ObservableObject {
         static let codeWarnings = "activeProtection.warn.codeRisks"
         static let binaryWarnings = "activeProtection.warn.binaryContent"
         static let fileMetadataWarnings = "activeProtection.warn.fileMetadata"
+        static let identifierWarnings = "activeProtection.warn.opaqueIdentifiers"
+        static let scamWarnings = "activeProtection.warn.scamAttempts"
+        static let adaptiveModelEnabled = "activeProtection.adaptiveModel.enabled"
+        static let clipboardAlertVisibility = "activeProtection.alertVisibility"
+        static let hidesGreenAndYellowAlerts = "activeProtection.hideGreenAndYellowAlerts"
+        static let clipboardAutomationProtocol = "activeProtection.clipboardAutomationProtocol"
         static let trackedLinkWarnings = "activeProtection.warn.trackedLinks"
         static let patternWarnings = "activeProtection.warn.patterns"
         static let automaticLinkCleaning = "activeProtection.autoCleanLinks"

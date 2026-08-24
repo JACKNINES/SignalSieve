@@ -27,12 +27,28 @@ non-symlink executable below that same folder. Manifest schema version 1 is:
   "executable": "bin/example-detector",
   "capabilities": ["score", "regenerate"],
   "license": "Apache-2.0",
-  "homepage": "https://example.invalid/project"
+  "homepage": "https://example.invalid/project",
+  "detectorFamilies": ["Tree-Ring", "Ring-ID"],
+  "verificationMode": "same-scheme",
+  "modelDigest": "sha256:optional-model-or-checkpoint-digest"
 }
 ```
 
 Absolute executable paths and paths containing `..` are rejected. The module
 must declare at least one supported capability.
+
+The last three fields are optional for backward compatibility. New learned
+modules should declare them. `forensic-heuristic` means no scheme-specific
+model or key, `same-scheme` means a research reproduction using matching
+parameters, and `provider-compatible` is reserved for a detector whose provider
+compatibility can be independently documented.
+
+MarkDiffusion is the preferred open adapter target for Tree-Ring, Ring-ID,
+ROBIN, WIND, SFW, Gaussian-Shading, GaussMarker, PRC, and SEAL experiments
+because its upstream code is Apache-2.0. A reverse-SynthID checkout may be used
+only as an explicitly selected external module under its non-commercial
+research license. Signal Sieve does not redistribute either project, model
+weights, or unlicensed regeneration code.
 
 ## Score operation
 

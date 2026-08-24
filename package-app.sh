@@ -16,6 +16,7 @@ PIXEL_MODULE_DIR="$RESOURCES_DIR/PixelModules/Baseline"
 SPECTRAL_MODULE_DIR="$RESOURCES_DIR/PixelModules/Spectral"
 PDF_TOOLS_DIR="$RESOURCES_DIR/PDFTools"
 LICENSES_DIR="$RESOURCES_DIR/Licenses"
+THEME_ICONS_DIR="$RESOURCES_DIR/ThemeIcons"
 ICON_FILE="$PROJECT_ROOT/Packaging/SignalSieveIcon.icns"
 
 "$PROJECT_ROOT/build-local.sh"
@@ -31,6 +32,7 @@ mkdir -p \
     "$PIXEL_MODULE_DIR" \
     "$SPECTRAL_MODULE_DIR" \
     "$PDF_TOOLS_DIR" \
+    "$THEME_ICONS_DIR" \
     "$LICENSES_DIR/SignalSieve" \
     "$LICENSES_DIR/qpdf" \
     "$LICENSES_DIR/libjpeg-turbo"
@@ -38,6 +40,12 @@ cp "$PROJECT_ROOT/Packaging/Info.plist" "$CONTENTS/Info.plist"
 cp "$BUILD_DIR/SignalSieve" "$MACOS_DIR/SignalSieve"
 cp "$BUILD_DIR/libSignalSieveCore.dylib" "$FRAMEWORKS_DIR/libSignalSieveCore.dylib"
 cp "$ICON_FILE" "$RESOURCES_DIR/SignalSieveIcon.icns"
+cp "$PROJECT_ROOT/Packaging/ThemeIcons/SignalSieveIcon-Dark.png" \
+    "$THEME_ICONS_DIR/SignalSieveIcon-Dark.png"
+cp "$PROJECT_ROOT/Packaging/ThemeIcons/SignalSieveIcon-Light.png" \
+    "$THEME_ICONS_DIR/SignalSieveIcon-Light.png"
+cp "$PROJECT_ROOT/Packaging/ThemeIcons/SignalSieveIcon-IridescentPink.png" \
+    "$THEME_ICONS_DIR/SignalSieveIcon-IridescentPink.png"
 cp "$PROJECT_ROOT/Packaging/PixelModules/Baseline/signalsieve-pixel-module.json" \
     "$PIXEL_MODULE_DIR/signalsieve-pixel-module.json"
 cp "$BUILD_DIR/SignalSievePixelBaseline" \

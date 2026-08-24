@@ -19,6 +19,7 @@ struct SheetScaffold<Content: View, Footer: View>: View {
     @ViewBuilder let footer: () -> Footer
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.sieveTheme) private var theme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,10 +41,10 @@ struct SheetScaffold<Content: View, Footer: View>: View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(SievePalette.accentFill(colorScheme))
+                    .fill(SievePalette.accentFill(colorScheme, theme: theme))
                 Image(systemName: systemImage)
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(SievePalette.accentInk(colorScheme))
+                    .foregroundStyle(SievePalette.accentInk(colorScheme, theme: theme))
             }
             .frame(width: 34, height: 34)
             .accessibilityHidden(true)
@@ -67,7 +68,7 @@ struct SheetScaffold<Content: View, Footer: View>: View {
                     .fixedSize()
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(SievePalette.trackFill(colorScheme), in: Capsule())
+                    .background(SievePalette.trackFill(colorScheme, theme: theme), in: Capsule())
             }
 
             Button(doneTitle, action: onDone)

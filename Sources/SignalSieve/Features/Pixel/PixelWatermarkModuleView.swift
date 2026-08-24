@@ -155,6 +155,22 @@ struct PixelWatermarkModuleView: View {
                             .background(.purple.opacity(0.12), in: Capsule())
                     }
                 }
+                if let families = module.manifest.detectorFamilies, !families.isEmpty {
+                    Text(localized("Detector families") + ": " + families.joined(separator: ", "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let mode = module.manifest.verificationMode {
+                    Text(localized("Verification scope") + ": " + mode.rawValue)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(mode == .providerCompatible ? .orange : .secondary)
+                }
+                if let digest = module.manifest.modelDigest {
+                    Text(localized("Model digest") + ": " + digest)
+                        .font(.caption2.monospaced())
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                }
                 Text(module.rootURL.path)
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)

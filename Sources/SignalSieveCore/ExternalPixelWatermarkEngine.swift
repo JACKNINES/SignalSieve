@@ -7,6 +7,12 @@ public enum PixelModuleCapability: String, Codable, Sendable, CaseIterable {
     case regenerate
 }
 
+public enum PixelWatermarkVerificationMode: String, Codable, Sendable, CaseIterable {
+    case forensicHeuristic = "forensic-heuristic"
+    case sameScheme = "same-scheme"
+    case providerCompatible = "provider-compatible"
+}
+
 public struct PixelWatermarkModuleManifest: Codable, Sendable, Equatable {
     public let schemaVersion: Int
     public let name: String
@@ -15,6 +21,9 @@ public struct PixelWatermarkModuleManifest: Codable, Sendable, Equatable {
     public let capabilities: [PixelModuleCapability]
     public let license: String
     public let homepage: String?
+    public let detectorFamilies: [String]?
+    public let verificationMode: PixelWatermarkVerificationMode?
+    public let modelDigest: String?
 
     public init(
         schemaVersion: Int,
@@ -23,7 +32,10 @@ public struct PixelWatermarkModuleManifest: Codable, Sendable, Equatable {
         executable: String,
         capabilities: [PixelModuleCapability],
         license: String,
-        homepage: String? = nil
+        homepage: String? = nil,
+        detectorFamilies: [String]? = nil,
+        verificationMode: PixelWatermarkVerificationMode? = nil,
+        modelDigest: String? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.name = name
@@ -32,6 +44,9 @@ public struct PixelWatermarkModuleManifest: Codable, Sendable, Equatable {
         self.capabilities = capabilities
         self.license = license
         self.homepage = homepage
+        self.detectorFamilies = detectorFamilies
+        self.verificationMode = verificationMode
+        self.modelDigest = modelDigest
     }
 }
 
@@ -469,6 +484,9 @@ public enum ExternalPixelWatermarkEngine {
             && !manifest.capabilities.isEmpty
             && manifest.license.count <= 200
             && (manifest.homepage?.count ?? 0) <= 500
+            && (manifest.detectorFamilies?.count ?? 0) <= 64
+            && (manifest.detectorFamilies?.allSatisfy { !$0.isEmpty && $0.count <= 120 } ?? true)
+            && (manifest.modelDigest?.count ?? 0) <= 256
     }
 
     private static func isDescendant(_ candidate: URL, of root: URL) -> Bool {

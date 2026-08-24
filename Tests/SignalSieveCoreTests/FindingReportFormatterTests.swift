@@ -186,3 +186,19 @@ func formatsSafeSignatureReport() {
     #expect(report.contains("⟦U+200B⟧"))
     #expect(!report.contains("\u{200B}"))
 }
+
+@Test("Link reports distinguish removed, preserved, and unresolved treatments")
+func formatsLinkSanitizationReport() {
+    let result = URLTrackerCleaner.cleanLinks(
+        in: "https://example.com/a?rdt_cid=abc&q=keep https://pin.it/4AbCdEf"
+    )
+    let report = FindingReportFormatter.linkSanitizationReport(result, language: .spanish)
+
+    #expect(report.contains("Reporte de sanitización de enlaces"))
+    #expect(report.contains("Eliminado"))
+    #expect(report.contains("Conservado porque puede ser funcional"))
+    #expect(report.contains("Detectado pero no resoluble sin conexión"))
+    #expect(report.contains("No se realizó ninguna solicitud de red."))
+    #expect(report.contains("rdt_cid"))
+    #expect(report.contains("q"))
+}

@@ -5,10 +5,15 @@ import SignalSieveCore
 
 struct WatermarkProbeView: View {
     let report: WatermarkProbeReport
+    let text: String
     let language: AppLanguage
     let onCopy: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var detectorModule: ExternalTextWatermarkModule?
+    @State private var detectorResult: TextWatermarkDetectionResult?
+    @State private var detectorError: String?
+    @State private var isDetecting = false
 
     var body: some View {
         SheetScaffold(
@@ -180,10 +185,113 @@ struct WatermarkProbeView: View {
                     .padding(9)
                     .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
                 }
+                Divider().padding(.vertical, 4)
+                statisticalDetectorControls
             }
         }
         .padding(12)
         .background(.blue.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+    }
+
+    private var statisticalDetectorControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(localized("Local statistical detector"))
+                        .font(.subheadline.weight(.semibold))
+                    Text(localized("Runs a compatible KGW, SynthID-Text, or research detector selected by you."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(localized("Choose Detector…"), systemImage: "folder") {
+                    chooseDetector()
+                }
+            }
+            if let module = detectorModule {
+                Text("\(module.manifest.name) · \(module.manifest.schemes.joined(separator: ", "))")
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                Text(localized(detectorDisclosure(module.manifest)))
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                HStack {
+                    if isDetecting { ProgressView().controlSize(.small) }
+                    Button(localized("Run Statistical Detector"), systemImage: "waveform.path.ecg") {
+                        runDetector(module)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isDetecting || text.isEmpty)
+                }
+            }
+            if let result = detectorResult {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(result.scheme) · \(result.detector)")
+                        .font(.caption.weight(.semibold))
+                    Text(formatted("Statistic: %.4f · %d tokens", result.statistic, result.tokenCount))
+                        .font(.caption.monospacedDigit())
+                    if let pValue = result.pValue {
+                        Text(formatted("p-value: %.6g", pValue))
+                            .font(.caption.monospacedDigit())
+                    }
+                    Text(localized(result.detected == true ? "Compatible detector found the configured watermark." : "The configured watermark was not confirmed."))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(result.detected == true ? .red : .green)
+                }
+                .padding(9)
+                .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+            }
+            if let detectorError {
+                Label(detectorError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func chooseDetector() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = localized("Choose Detector")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            detectorModule = try ExternalTextWatermarkEngine.loadModule(at: url)
+            detectorResult = nil
+            detectorError = nil
+        } catch {
+            detectorModule = nil
+            detectorError = localized("The selected folder is not a valid Signal Sieve text-detector module.")
+        }
+    }
+
+    private func runDetector(_ module: ExternalTextWatermarkModule) {
+        isDetecting = true
+        detectorError = nil
+        detectorResult = nil
+        let sample = text
+        Task.detached(priority: .userInitiated) {
+            let result = Result { try ExternalTextWatermarkEngine.detect(sample, using: module) }
+            await MainActor.run {
+                isDetecting = false
+                switch result {
+                case let .success(value): detectorResult = value
+                case .failure: detectorError = localized("The detector failed or returned an invalid result. No provider conclusion was made.")
+                }
+            }
+        }
+    }
+
+    private func detectorDisclosure(_ manifest: TextWatermarkModuleManifest) -> String {
+        let scope = switch manifest.verificationMode {
+        case .sameConfiguration: "Same-configuration research result; it is not a vendor oracle."
+        case .providerCompatible: "Provider-compatible result; verify the module and its parameters independently."
+        case .researchHeuristic: "Research heuristic; false positives and false negatives are expected."
+        }
+        return manifest.requiresSecretKey
+            ? scope + " This detector requires its matching local key/configuration."
+            : scope
     }
 
     private var signalCards: some View {

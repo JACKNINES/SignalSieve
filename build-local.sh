@@ -66,23 +66,32 @@ swiftc \
     -module-name SignalSieveCore \
     "$PROJECT_ROOT/Sources/SignalSieveCore/AppLocalization.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/AppTheme.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/AdaptiveCopyModel.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/BinaryContentDetector.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/BoundedZIPReader.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/BoundedZIPRewriter.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/ClipboardProtectionAnalyzer.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/ClipboardAutomationProtocol.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/ClipboardTypeInventory.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/ClipboardHistory.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/ClipboardImageImporter.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/CommunityWatermarkService.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/CovertTextChannelAnalyzer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/CodeLanguageDetector.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/CodeGuard.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/EvidenceConfidence.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/ExternalPixelWatermarkEngine.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/ExternalTextWatermarkEngine.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/ExtendedContainerInspector.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/ExtendedMetadataCleaner.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/FileMetadataCleaner.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/FileProvenanceAnalyzer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/FindingReportFormatter.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/HiddenTextAnalyzer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/InvisibleFragmentRevealer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/LocalRewriteEngine.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/LinkSanitizationModels.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/OpaqueIdentifierAnalyzer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/PayloadEquivalenceDetector.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/PDFMetadataSanitizer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/PatternAnalyzer.swift" \
@@ -90,6 +99,7 @@ swiftc \
     "$PROJECT_ROOT/Sources/SignalSieveCore/PixelSpectralForensics.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/ProviderWatermarkRegistry.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/RuleSystem.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/ScamAttemptDetector.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/RewriteIntegrityAnalyzer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/SignalSieveIgnore.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/SignatureHunt.swift" \
@@ -147,24 +157,31 @@ swiftc \
     -I "$PROJECT_ROOT/Sources/CSignalSieveZip/include" \
     -L "$BUILD_DIR" \
     -lSignalSieveCore \
-    "$PROJECT_ROOT/Sources/SignalSieve/SignalSieveApp.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/ClipboardNoticePanel.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/ClipboardImagePasteboardReader.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/SignalSieveViewModel.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/ClipboardHistoryView.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/RevealView.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/RewriteIntegrityView.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/FindingCopyButton.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/FileProvenanceView.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/ContentView.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/SieveControls.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/SheetScaffold.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/PatternReportView.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/PixelWatermarkModuleView.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/PrivateRulesView.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/SignatureHuntView.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/VaccineView.swift" \
-    "$PROJECT_ROOT/Sources/SignalSieve/WatermarkProbeView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/App/SignalSieveApp.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/App/SignalSieveViewModel.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/App/ContentView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/DesignSystem/WindowAppearanceBridge.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/DesignSystem/SieveControls.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/DesignSystem/SheetScaffold.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/DesignSystem/FindingCopyButton.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/ActiveGuard/ClipboardNoticePanel.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/ActiveGuard/ThreatInsightsView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/FileInspector/FileProvenanceView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/Help/GlossaryView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/History/ClipboardHistoryView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/Integrations/CommunityEnginesView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/Links/LinkCoverageView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/Patterns/PatternReportView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/Patterns/WatermarkProbeView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/Patterns/RewriteIntegrityView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/Pixel/PixelWatermarkModuleView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/Reveal/RevealView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/Reveal/CovertChannelView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/Rules/PrivateRulesView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/Vaccine/SignatureHuntView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/Vaccine/VaccineView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Platform/ApplicationIconController.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Platform/ClipboardImagePasteboardReader.swift" \
     -o "$BUILD_DIR/SignalSieve" \
     -Xlinker -rpath \
     -Xlinker @executable_path

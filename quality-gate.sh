@@ -15,6 +15,9 @@ PDF_SANITIZER="$APP_BUNDLE/Contents/Resources/PDFTools/SignalSievePDFSanitizer"
 PROJECT_LICENSE="$APP_BUNDLE/Contents/Resources/Licenses/SignalSieve/LICENSE"
 SOURCE_NOTICE="$APP_BUNDLE/Contents/Resources/SOURCE.md"
 TRADEMARK_NOTICE="$APP_BUNDLE/Contents/Resources/TRADEMARKS.md"
+THEME_ICON_DARK="$APP_BUNDLE/Contents/Resources/ThemeIcons/SignalSieveIcon-Dark.png"
+THEME_ICON_LIGHT="$APP_BUNDLE/Contents/Resources/ThemeIcons/SignalSieveIcon-Light.png"
+THEME_ICON_PINK="$APP_BUNDLE/Contents/Resources/ThemeIcons/SignalSieveIcon-IridescentPink.png"
 MODULE_CACHE="$PROJECT_ROOT/.build/module-cache"
 TESTING_FRAMEWORK_FLAGS=()
 for framework_directory in \
@@ -79,10 +82,23 @@ if [[ ! -x "$EXECUTABLE" \
     || ! -x "$PDF_SANITIZER" \
     || ! -r "$PROJECT_LICENSE" \
     || ! -r "$SOURCE_NOTICE" \
-    || ! -r "$TRADEMARK_NOTICE" ]]; then
+    || ! -r "$TRADEMARK_NOTICE" \
+    || ! -r "$THEME_ICON_DARK" \
+    || ! -r "$THEME_ICON_LIGHT" \
+    || ! -r "$THEME_ICON_PINK" ]]; then
     print -u2 "Packaged executable or core framework has invalid permissions."
     exit 1
 fi
+
+for theme_icon in "$THEME_ICON_DARK" "$THEME_ICON_LIGHT" "$THEME_ICON_PINK"; do
+    if ! sips -g pixelWidth -g pixelHeight "$theme_icon" \
+            | grep -F 'pixelWidth: 1024' >/dev/null \
+        || ! sips -g pixelWidth -g pixelHeight "$theme_icon" \
+            | grep -F 'pixelHeight: 1024' >/dev/null; then
+        print -u2 "Packaged theme icon is not 1024 by 1024: $theme_icon"
+        exit 1
+    fi
+done
 
 if ! grep -F 'Mozilla Public License Version 2.0' "$PROJECT_LICENSE" \
         || ! grep -F 'MPL-2.0' "$SOURCE_NOTICE"; then

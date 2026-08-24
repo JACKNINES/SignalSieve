@@ -4,6 +4,7 @@ import SwiftUI
 import SignalSieveCore
 
 struct ContentView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var model: SignalSieveViewModel
     @State private var showsPrivateRules = false
     @State private var showsVaccine = false
@@ -13,6 +14,10 @@ struct ContentView: View {
     @State private var showsWatermarkProbe = false
     @State private var showsRewriteIntegrity = false
     @State private var showsPixelWatermarkModule = false
+    @State private var showsLinkCoverage = false
+    @State private var showsGlossary = false
+    @State private var showsCovertChannels = false
+    @State private var showsCommunityEngines = false
     @State private var toolbarSection: ToolbarSection = .review
     @State private var expandedPanel: EditorPanel?
 
@@ -36,6 +41,23 @@ struct ContentView: View {
 
             Divider()
             findingsPanel
+            if model.identifierAnalysis.containsIdentifiers
+                || !model.scamAnalysis.signals.isEmpty
+                || model.adaptiveAnalysis.isAnomalous {
+                Divider()
+                ScrollView {
+                    ThreatInsightsView(
+                        identifiers: model.identifierAnalysis,
+                        scam: model.scamAnalysis,
+                        adaptive: model.adaptiveAnalysis,
+                        adaptiveSampleCount: model.adaptiveModelSampleCount,
+                        isAdaptiveEnabled: model.isAdaptiveModelEnabled,
+                        language: model.language,
+                        onCopy: model.copyFindingText
+                    )
+                }
+                .frame(minHeight: 130, maxHeight: 210)
+            }
             if model.binaryAnalysis.isDetected {
                 Divider()
                 binaryGuardPanel
@@ -84,6 +106,7 @@ struct ContentView: View {
         .sheet(isPresented: $showsWatermarkProbe) {
             WatermarkProbeView(
                 report: model.watermarkProbeReport,
+                text: model.input,
                 language: model.language,
                 onCopy: model.copyFindingText
             )
@@ -98,6 +121,13 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showsPixelWatermarkModule) {
             PixelWatermarkModuleView(language: model.language)
+        }
+        .sheet(isPresented: $showsLinkCoverage) {
+            LinkCoverageView(
+                report: model.linkCleaningReport,
+                language: model.language,
+                onCopy: model.copyFindingText
+            )
         }
         .sheet(
             isPresented: $model.showsFileProvenance,
@@ -116,17 +146,28 @@ struct ContentView: View {
         .sheet(isPresented: $showsSignatureHunt) {
             SignatureHuntView(language: model.language, onCopy: model.copyFindingText)
         }
+        .sheet(isPresented: $showsGlossary) {
+            GlossaryView(language: model.language)
+        }
+        .sheet(isPresented: $showsCovertChannels) {
+            CovertChannelView(
+                report: model.covertChannelReport,
+                language: model.language,
+                onCopy: model.copyFindingText
+            )
+        }
+        .sheet(isPresented: $showsCommunityEngines) {
+            CommunityEnginesView(
+                text: model.input,
+                language: model.language,
+                onUseResult: { model.output = $0 }
+            )
+        }
     }
 
     private var header: some View {
         HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(.blue.opacity(0.14))
-                Image(systemName: "text.magnifyingglass")
-                    .font(.system(size: 23, weight: .semibold))
-                    .foregroundStyle(.blue)
-            }
+            brandMark
             .frame(width: 42, height: 42)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -167,7 +208,9 @@ struct ContentView: View {
             statusPill(
                 model.activeGuardLabel,
                 systemImage: model.isActiveProtectionEnabled ? "eye.circle.fill" : "eye.slash.circle",
-                color: model.isActiveProtectionEnabled ? .blue : .secondary
+                color: model.isActiveProtectionEnabled
+                    ? (model.theme.usesIridescentPalette ? .pink : .blue)
+                    : .secondary
             )
 
             statusPill(model.localized("Offline"), systemImage: "lock.shield.fill", color: .green)
@@ -175,6 +218,45 @@ struct ContentView: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .background {
+            headerBackground
+        }
+    }
+
+    @ViewBuilder
+    private var brandMark: some View {
+        if let image = ApplicationIconController.image(
+            theme: model.theme,
+            systemIsDark: colorScheme == .dark
+        ) {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .antialiased(true)
+                .scaledToFit()
+                .accessibilityHidden(true)
+        } else {
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .antialiased(true)
+                .scaledToFit()
+                .accessibilityHidden(true)
+        }
+    }
+
+    @ViewBuilder
+    private var headerBackground: some View {
+        if model.theme.usesIridescentPalette {
+            LinearGradient(
+                colors: [
+                    Color.pink.opacity(0.13),
+                    Color.purple.opacity(0.075),
+                    Color.cyan.opacity(0.055)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        } else {
             LinearGradient(
                 colors: [.blue.opacity(0.055), .clear],
                 startPoint: .leading,
@@ -242,10 +324,12 @@ struct ContentView: View {
             Divider()
             Button(model.localized("Clear Session Memory"), role: .destructive, action: model.clearPatternMemory)
         } label: {
-            SieveMenuLabel(title: model.localized("Memory"), systemImage: "brain.head.profile")
+            Label(model.localized("Memory"), systemImage: "brain.head.profile")
+                .font(.system(size: 12, weight: .semibold))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
         .fixedSize()
 
         Button {
@@ -271,7 +355,7 @@ struct ContentView: View {
             Toggle(model.localized("Monitor New Clipboard Text"), isOn: $model.isActiveProtectionEnabled)
             Divider()
             Text(model.formatted(
-                "%d of 6 warning types enabled",
+                "%d of 9 warning types enabled",
                 model.enabledWarningCount
             ))
             Toggle(model.localized("Warn About Hidden Unicode"), isOn: $model.warnsAboutHiddenUnicode)
@@ -280,22 +364,84 @@ struct ContentView: View {
             Toggle(model.localized("Warn About Source-Code Risks"), isOn: $model.warnsAboutCodeRisks)
             Toggle(model.localized("Warn About Binary or Encoded Data"), isOn: $model.warnsAboutBinaryContent)
             Toggle(model.localized("Warn About File or Image Metadata"), isOn: $model.warnsAboutFileMetadata)
+            Toggle(model.localized("Warn About Opaque Identifiers"), isOn: $model.warnsAboutOpaqueIdentifiers)
+            Toggle(model.localized("Warn About Possible Scam Attempts"), isOn: $model.warnsAboutScamAttempts)
+            Toggle(model.localized("Learn my usual copy patterns on this Mac"), isOn: $model.isAdaptiveModelEnabled)
+            Text(model.formatted(
+                "Learning usual patterns · %d/%d+ copies",
+                model.adaptiveModelSampleCount,
+                AdaptiveCopyModel.minimumTrainingSamples
+            ))
             Button(model.localized("Enable All Warning Types"), action: model.enableAllWarningTypes)
-                .disabled(model.enabledWarningCount == 6)
+                .disabled(model.enabledWarningCount == 9)
+            Button(model.localized("Forget learned copy patterns"), role: .destructive, action: model.clearAdaptiveModel)
+                .disabled(model.adaptiveModelSampleCount == 0)
+            Text(model.localized("Red alerts always appear, even when their warning category is turned off."))
             Divider()
             Toggle(model.localized("Automatically Clean Copied Links"), isOn: $model.automaticallyCleansLinks)
             Text(model.localized("Monitoring runs locally while SignalSieve is open."))
         } label: {
-            SieveMenuLabel(title: model.localized("Active Guard"), systemImage: "eye.circle")
+            Label(model.localized("Active Guard"), systemImage: "eye.circle")
+                .font(.system(size: 12, weight: .semibold))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .fixedSize()
+
+        Menu {
+            Toggle(
+                model.localized("Stop showing green and yellow alerts"),
+                isOn: Binding(
+                    get: { model.hidesGreenAndYellowAlerts },
+                    set: model.setHidesGreenAndYellowAlerts
+                )
+            )
+            Text(model.localized("Orange and red alerts remain visible. Red alerts cannot be disabled."))
+            Toggle(
+                model.localized("Stop showing green through orange alerts"),
+                isOn: Binding(
+                    get: { model.hidesGreenThroughOrangeAlerts },
+                    set: model.setHidesGreenThroughOrangeAlerts
+                )
+            )
+            Text(model.localized("Only red alerts remain visible. Red alerts cannot be disabled."))
+            Text(model.localized("Alert visibility choices are mutually exclusive."))
+            Divider()
+            Toggle(
+                model.localized("Automatically use Safe Clean for copied text"),
+                isOn: clipboardProtocolBinding(.safeClean)
+            )
+            Toggle(
+                model.localized("Automatically use Strict Clean for copied text"),
+                isOn: clipboardProtocolBinding(.strictClean)
+            )
+            Divider()
+            Text(model.formatted(
+                "Automatic cleaning: %@",
+                model.localized(clipboardProtocolName)
+            ))
+            Text(model.localized("Safe Clean and Strict Clean are mutually exclusive. Alert visibility is a separate setting."))
+            Text(model.localized("Automatic text cleaning skips source code, files, images, and privacy-sensitive clipboard types."))
+        } label: {
+            Label(model.localized("Copying Settings"), systemImage: "arrow.triangle.2.circlepath")
+                .font(.system(size: 12, weight: .semibold))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
         .fixedSize()
 
         Button(model.localized("Rules"), systemImage: "slider.horizontal.3") {
             showsPrivateRules = true
         }
         .sieveToolbarButton()
+
+        Button(model.localized("Glossary"), systemImage: "book.closed") {
+            showsGlossary = true
+        }
+        .sieveToolbarButton()
+        .help(model.localized("Plain-language explanations of SignalSieve terms."))
     }
 
     @ViewBuilder
@@ -314,6 +460,14 @@ struct ContentView: View {
         .sieveToolbarButton()
         Button(model.localized("Pixel Lab"), systemImage: "photo.badge.magnifyingglass") {
             showsPixelWatermarkModule = true
+        }
+        .sieveToolbarButton()
+        Button(model.localized("Carrier Lab"), systemImage: "point.3.filled.connected.trianglepath.dotted") {
+            showsCovertChannels = true
+        }
+        .sieveToolbarButton()
+        Button(model.localized("Community Engines"), systemImage: "shippingbox.and.arrow.backward") {
+            showsCommunityEngines = true
         }
         .sieveToolbarButton()
 
@@ -345,6 +499,11 @@ struct ContentView: View {
             .sieveToolbarButton()
         Button(model.localized("Clean Links"), systemImage: "link.badge.plus", action: model.cleanLinks)
             .sieveToolbarButton()
+        Button(model.localized("Link Coverage"), systemImage: "list.bullet.rectangle.portrait") {
+            showsLinkCoverage = true
+        }
+        .sieveToolbarButton()
+        .help(model.localized("View the offline coverage matrix and the last link treatment report."))
         Button(
             model.localized("Code Clean (Review)"),
             systemImage: "chevron.left.forwardslash.chevron.right",
@@ -788,6 +947,23 @@ struct ContentView: View {
 
     private func legendItem(level: HiddenElementRiskLevel) -> some View {
         legendItem(label: AppLocalization.riskLabel(level, language: model.language), color: level.color)
+    }
+
+    private func clipboardProtocolBinding(
+        _ selection: ClipboardAutomationProtocol
+    ) -> Binding<Bool> {
+        Binding(
+            get: { model.clipboardAutomationProtocol == selection },
+            set: { model.setClipboardProtocolOption(selection, isSelected: $0) }
+        )
+    }
+
+    private var clipboardProtocolName: String {
+        switch model.clipboardAutomationProtocol {
+        case .reviewAll: "Off"
+        case .safeClean: "Automatic Safe Clean"
+        case .strictClean: "Automatic Strict Clean"
+        }
     }
 
     private func legendItem(label: String, color: Color) -> some View {

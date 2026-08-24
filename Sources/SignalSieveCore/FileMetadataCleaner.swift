@@ -66,7 +66,10 @@ public enum FileMetadataCleaner {
     ]
 
     public static func supports(_ format: ProvenanceFileFormat) -> Bool {
-        [.png, .jpeg, .pdf, .docx, .odt].contains(format)
+        [
+            .png, .jpeg, .webp, .avif, .heic, .bmp, .gif, .tiff,
+            .pdf, .docx, .xlsx, .pptx, .epub, .odt
+        ].contains(format)
     }
 
     public static func suggestedCopyName(for sourceURL: URL) -> String {
@@ -180,6 +183,8 @@ public enum FileMetadataCleaner {
             try cleanPNG(data)
         case .jpeg:
             try cleanJPEG(data)
+        case .webp, .avif, .heic, .bmp, .gif, .tiff, .xlsx, .pptx, .epub:
+            try ExtendedMetadataCleaner.clean(data, format: format)
         case .pdf:
             try cleanPDF(data)
         case .docx:

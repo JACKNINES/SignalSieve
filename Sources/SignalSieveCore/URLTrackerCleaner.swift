@@ -6,18 +6,38 @@ public struct URLCleaningResult: Sendable, Equatable {
     public let linksFound: Int
     public let linksChanged: Int
     public let removedParameterCount: Int
+    public let findings: [LinkSanitizationFinding]
 
     public init(
         text: String,
         linksFound: Int,
         linksChanged: Int,
-        removedParameterCount: Int
+        removedParameterCount: Int,
+        findings: [LinkSanitizationFinding] = []
     ) {
         self.text = text
         self.linksFound = linksFound
         self.linksChanged = linksChanged
         self.removedParameterCount = removedParameterCount
+        self.findings = findings
     }
+
+    public var unresolvedRedirectCount: Int {
+        findings.filter { $0.treatment == .detectedOfflineUnresolvable }.count
+    }
+
+    public var linksFlagged: Int {
+        Set(findings.compactMap { finding in
+            switch finding.treatment {
+            case .removed, .detectedOfflineUnresolvable:
+                finding.originalURL
+            case .preservedFunctional, .outsideClipboardScope:
+                nil
+            }
+        }).count
+    }
+
+    public var hasTrackingRisk: Bool { linksFlagged > 0 }
 }
 
 public enum URLTrackerCleaner {
@@ -32,6 +52,7 @@ public enum URLTrackerCleaner {
         "hsctatracking",
         "igsh",
         "igshid",
+        "epik",
         "irclickid",
         "li_fat_id",
         "mc_cid",
@@ -41,8 +62,11 @@ public enum URLTrackerCleaner {
         "oly_anon_id",
         "oly_enc_id",
         "rb_clickid",
+        "rdt_cid",
         "s_cid",
         "sc_channel",
+        "sc_click_id",
+        "sccid",
         "spm",
         "ttclid",
         "twclid",
@@ -70,8 +94,26 @@ public enum URLTrackerCleaner {
         (
             domains: ["x.com", "twitter.com"],
             parameters: ["s", "t"]
+        ),
+        (
+            domains: ["reddit.com"],
+            parameters: ["share_id", "share_name"]
+        ),
+        (
+            domains: ["threads.com", "threads.net"],
+            parameters: ["xmt"]
+        ),
+        (
+            domains: ["linkedin.com"],
+            parameters: ["rcm", "trk", "trackingid"]
         )
     ]
+
+    private struct SingleURLResult {
+        let url: String
+        let removedParameterCount: Int
+        let findings: [LinkSanitizationFinding]
+    }
 
     /// Finds HTTP(S) links in arbitrary text and removes only known tracking
     /// parameters. Functional query parameters are intentionally preserved.
@@ -100,11 +142,17 @@ public enum URLTrackerCleaner {
         var output = text
         var linksChanged = 0
         var removedParameterCount = 0
+        var findings: [LinkSanitizationFinding] = []
 
         for match in matches.reversed() {
             guard let range = Range(match.range, in: output) else { continue }
             let original = String(output[range])
-            let cleaned = cleanURLString(original, customRules: customRules)
+            let cleaned = analyzeURLString(
+                original,
+                customRules: customRules,
+                redirectDepth: 0
+            )
+            findings.append(contentsOf: cleaned.findings)
             guard cleaned.url != original else { continue }
 
             output.replaceSubrange(range, with: cleaned.url)
@@ -116,7 +164,8 @@ public enum URLTrackerCleaner {
             text: output,
             linksFound: matches.count,
             linksChanged: linksChanged,
-            removedParameterCount: removedParameterCount
+            removedParameterCount: removedParameterCount,
+            findings: findings
         )
     }
 
@@ -127,20 +176,21 @@ public enum URLTrackerCleaner {
         url: String,
         removedParameterCount: Int
     ) {
-        cleanURLString(input, customRules: customRules, redirectDepth: 0)
+        let result = analyzeURLString(input, customRules: customRules, redirectDepth: 0)
+        return (result.url, result.removedParameterCount)
     }
 
-    private static func cleanURLString(
+    private static func analyzeURLString(
         _ input: String,
         customRules: [CustomURLRule],
         redirectDepth: Int
-    ) -> (url: String, removedParameterCount: Int) {
+    ) -> SingleURLResult {
         guard
             var components = URLComponents(string: input),
             let scheme = components.scheme?.lowercased(),
             scheme == "http" || scheme == "https"
         else {
-            return (input, 0)
+            return SingleURLResult(url: input, removedParameterCount: 0, findings: [])
         }
 
         let host = components.host?.lowercased() ?? ""
@@ -149,23 +199,35 @@ public enum URLTrackerCleaner {
            isFacebookRedirect(host: host, path: components.path),
            let destination = components.queryItems?.first(where: { $0.name.lowercased() == "u" })?.value,
            destination != input {
-            let unwrapped = cleanURLString(
+            let unwrapped = analyzeURLString(
                 destination,
                 customRules: customRules,
                 redirectDepth: redirectDepth + 1
             )
             let wrapperParameters = max(1, (components.queryItems?.count ?? 1) - 1)
-            return (
-                unwrapped.url,
-                unwrapped.removedParameterCount + wrapperParameters
+            let wrapperFinding = LinkSanitizationFinding(
+                platform: .facebook,
+                treatment: .removed,
+                mechanism: .embeddedRedirect,
+                originalURL: input,
+                resultingURL: unwrapped.url,
+                parameterNames: components.queryItems?.map(\.name) ?? []
+            )
+            return SingleURLResult(
+                url: unwrapped.url,
+                removedParameterCount: unwrapped.removedParameterCount + wrapperParameters,
+                findings: [wrapperFinding] + unwrapped.findings
             )
         }
 
         let originalItems = components.queryItems ?? []
-        let retainedItems = originalItems.filter { item in
-            !isTrackingParameter(item.name, host: host, customRules: customRules)
+        let removedItems = originalItems.filter {
+            isTrackingParameter($0.name, host: host, customRules: customRules)
         }
-        let removedCount = originalItems.count - retainedItems.count
+        let retainedItems = originalItems.filter {
+            !isTrackingParameter($0.name, host: host, customRules: customRules)
+        }
+        let removedCount = removedItems.count
 
         if removedCount > 0 {
             components.queryItems = retainedItems.isEmpty ? nil : retainedItems
@@ -176,7 +238,78 @@ public enum URLTrackerCleaner {
             components.percentEncodedPath.removeLast()
         }
 
-        return (components.string ?? input, removedCount)
+        let resultingURL = components.string ?? input
+        let hostPlatform = LinkCoverageCatalog.platform(forHost: host)
+        let platform = hostPlatform == .other
+            ? inferredPlatform(from: removedItems.map(\.name))
+            : hostPlatform
+        var findings: [LinkSanitizationFinding] = []
+
+        if !removedItems.isEmpty {
+            findings.append(LinkSanitizationFinding(
+                platform: platform,
+                treatment: .removed,
+                mechanism: .queryParameter,
+                originalURL: input,
+                resultingURL: resultingURL,
+                parameterNames: removedItems.map(\.name)
+            ))
+        }
+
+        if !retainedItems.isEmpty {
+            findings.append(LinkSanitizationFinding(
+                platform: hostPlatform,
+                treatment: .preservedFunctional,
+                mechanism: .queryParameter,
+                originalURL: input,
+                resultingURL: resultingURL,
+                parameterNames: retainedItems.map(\.name)
+            ))
+        }
+
+        if let wrapperPlatform = opaqueRedirectPlatform(host: host, path: components.path) {
+            findings.append(LinkSanitizationFinding(
+                platform: wrapperPlatform,
+                treatment: .detectedOfflineUnresolvable,
+                mechanism: .opaqueRedirect,
+                originalURL: input,
+                resultingURL: resultingURL
+            ))
+        }
+
+        return SingleURLResult(
+            url: resultingURL,
+            removedParameterCount: removedCount,
+            findings: findings
+        )
+    }
+
+    private static func inferredPlatform(from parameterNames: [String]) -> TrackedLinkPlatform {
+        let names = Set(parameterNames.map { $0.lowercased() })
+        if !names.isDisjoint(with: ["sccid", "sc_click_id"]) { return .snapchat }
+        if names.contains("epik") { return .pinterest }
+        if names.contains("rdt_cid") { return .reddit }
+        if names.contains("li_fat_id") { return .linkedin }
+        if names.contains("ttclid") { return .tiktok }
+        if names.contains("twclid") { return .x }
+        if names.contains("fbclid") { return .facebook }
+        if names.contains("igsh") || names.contains("igshid") { return .instagram }
+        return .other
+    }
+
+    private static func opaqueRedirectPlatform(
+        host: String,
+        path: String
+    ) -> TrackedLinkPlatform? {
+        guard path.split(separator: "/").isEmpty == false else { return nil }
+
+        if domainMatches(host, domain: "t.snapchat.com") { return .snapchat }
+        if domainMatches(host, domain: "redd.it") { return .reddit }
+        if domainMatches(host, domain: "reddit.com"), path.contains("/s/") { return .reddit }
+        if domainMatches(host, domain: "pin.it") { return .pinterest }
+        if domainMatches(host, domain: "lnkd.in") { return .linkedin }
+        if domainMatches(host, domain: "t.co") { return .x }
+        return nil
     }
 
     private static func isTrackingParameter(

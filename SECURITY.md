@@ -33,6 +33,19 @@ public issue. Provide the smallest synthetic reproduction possible.
   identifiers remain unchanged because their intended spelling is unknowable.
 - Binary Guard never decodes or executes a detected payload. Encoded data is
   not inherently unsafe; the label describes its representation, not intent.
+- Contextual Unicode classification is fail-safe rather than blanket removal.
+  Default-ignorable characters are preserved by Safe Clean only when a bounded
+  emoji, writing-system, glyph-variation, directional, orthographic, or notation
+  context is recognized. Deprecated bidi controls, floating language tags,
+  invisible operators, and controls outside their expected script remain
+  actionable. Strict Clean intentionally removes functional invisible controls
+  too and may alter rendering. See [UNICODE_SECURITY.md](UNICODE_SECURITY.md).
+- Advanced Carrier Lab analyzes relationships across scalar sequences rather
+  than treating one character as proof. Base-4 zero-width runs, mixed-space
+  alphabets, trailing spaces/tabs, and recurring confusable letters require
+  minimum carrier and context thresholds. Decoded payloads are bounded inert
+  text. Automatic cleanup is limited to deterministic invisible or whitespace
+  carriers; visible confusable letters remain review-only.
 - Vaccine scans before writing, does not follow symbolic links, skips binary
   and oversized files, checks that each file is unchanged since the scan, and
   backs up every candidate before the first source file is rewritten. Only
@@ -41,6 +54,10 @@ public issue. Provide the smallest synthetic reproduction possible.
   are included in the folder report but are never rewritten by Vaccine.
 - Self-vaccination is rejected in the core engine as well as the interface;
   Signal Sieve's own security fixtures may intentionally contain attack data.
+- Vaccine has no supported non-GUI CLI or SARIF output in this release. CI
+  integration must not scrape the interface or treat an ad-hoc JSON conversion
+  as the official Signal Sieve result format. A future exporter must keep file
+  locations and bounded evidence separate from private source fragments.
 - Invisible payload previews are decoded locally into display-only strings,
   capped in length, and never interpreted as commands or executed. A decoded
   fragment indicates a recognizable encoding, not malicious intent.
@@ -79,10 +96,12 @@ public issue. Provide the smallest synthetic reproduction possible.
   never mutates the source payload. Clipboard replacement checks the pasteboard
   change count, and saving refuses an existing destination. Regeneration does
   not remove or disprove watermark patterns carried by visible pixel values.
-- Verified metadata cleaning supports bounded PNG, JPEG, PDF, DOCX, and ODT
-  structures, always targets a new path, and verifies both the unchanged source
-  and the reanalyzed result. DOCX `customXml` is preserved because removing it
-  can break bound content. PDF cleaning uses a pinned qpdf helper and verifies
+- Verified metadata cleaning supports bounded PNG, JPEG, WebP, AVIF/HEIC, BMP,
+  GIF, TIFF, PDF, DOCX, XLSX, PPTX, EPUB, and ODT structures. It always targets
+  a new path and verifies both the unchanged source and the reanalyzed result.
+  DOCX `customXml` is preserved because removing it can break bound content.
+  TIFF pointer graphs are refused when metadata payloads cannot be proven
+  disjoint from pixels. PDF cleaning uses a pinned qpdf helper and verifies
   structural invariants plus the reanalyzed copy; signed, encrypted, or
   parser-recovery PDFs are refused. Signed document packages are refused. This
   is not a cryptographic erasure guarantee.
@@ -98,6 +117,9 @@ public issue. Provide the smallest synthetic reproduction possible.
   context, and timeout. Proxy variables are removed, no configurable remote
   endpoint is accepted, and Signal Sieve contains no general-purpose
   in-process network client.
+  The optional `ollama-smoke-test.sh` exercises this same core path and prints
+  measurements rather than generated prose. It is deliberately excluded from
+  the mandatory release gate so builds do not acquire a model dependency.
 - Pixel Watermark Lab validates module paths, input/output bounds, dimensions,
   and source immutability. Its built-in LSB and spectral modules are heuristics
   that can confuse natural sensor noise, periodic texture, resampling, or
@@ -105,6 +127,15 @@ public issue. Provide the smallest synthetic reproduction possible.
   modules are not an operating-system sandbox. A selected
   third-party executable can ignore offline environment flags and must be
   trusted independently from Signal Sieve.
+- Community Engines is an explicit third-party execution boundary. The first
+  adapter accepts only `http://127.0.0.1:8765`, uses the documented
+  `watermarks-remover` health, capabilities, inspect, and clean routes, removes
+  proxy variables, bounds request/response sizes and time, and never invokes a
+  shell. Opening the panel sends only a health request; selected text is sent
+  to the local process only after an inspect or clean action. Loopback prevents
+  remote routing but does not sandbox that process. Signal Sieve never installs,
+  launches, or updates it, and reanalyzes returned text before offering Result.
+  See [COMMUNITY_ENGINES.md](COMMUNITY_ENGINES.md).
 
 SignalSieve reduces known text and URL tracking signals. It does not guarantee
 that arbitrary statistical or linguistic watermarks can be detected or

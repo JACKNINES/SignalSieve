@@ -78,3 +78,34 @@ Containers are useful only for reproducible research dependencies such as
 watermark harnesses and large Python/PyTorch stacks. They are not required to
 run the app and should never become a dependency of Active Guard, deterministic
 text cleaning, or verified metadata copies.
+
+Implemented boundary: the optional Community Engines adapter can call an
+independently installed `watermarks-remover` core service on fixed numeric
+loopback. It follows the service's published health, capabilities, inspect, and
+clean contract, sends text only after an explicit action, bounds all traffic,
+and performs native post-analysis. The app does not own the service lifecycle
+or inherit its detector claims. Future adapters must use the same capability,
+version, trust-disclosure, and post-verification rules; arbitrary configurable
+HTTP endpoints remain out of scope.
+
+## Headless Vaccine and SARIF
+
+The next automation boundary should reuse `VaccineEngine`; it should not create
+a second scanner with different rules. A supported command-line target must:
+
+- scan without launching AppKit or SwiftUI;
+- remain report-only unless an explicit mutation flag is supplied;
+- produce deterministic human-readable, JSON, and SARIF 2.1.0 output;
+- map every result to a stable rule ID, severity, relative file URI, line,
+  column, message, and partial fingerprint;
+- exclude raw source fragments from SARIF by default;
+- use documented exit codes for clean, policy-finding, usage-error, and
+  internal-error outcomes;
+- honor `.signalsieveignore`, file-size limits, symlink exclusions, and the same
+  self-vaccination block as the desktop app;
+- keep output on disk unless the user or CI workflow explicitly uploads it; and
+- pass schema validation, golden-file determinism tests, path-redaction tests,
+  and GitHub Code Scanning ingestion tests before being advertised.
+
+SARIF is an interchange format, not an upload mechanism. Signal Sieve should
+never require a GitHub account or network connection to generate it.

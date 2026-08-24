@@ -30,6 +30,7 @@ enum LocalTestRunner {
         let tests = [
             LocalTestCase(name: "hidden Unicode classification", body: testHiddenUnicode),
             LocalTestCase(name: "contextual Unicode preservation", body: testContextualUnicode),
+            LocalTestCase(name: "extended contextual Unicode carriers", body: testExtendedContextualUnicode),
             LocalTestCase(name: "private research query", body: testPrivateResearchQuery),
             LocalTestCase(name: "Unicode positions", body: testUnicodePositions),
             LocalTestCase(name: "safe and strict cleaning", body: testCleaningModes),
@@ -38,6 +39,7 @@ enum LocalTestRunner {
             LocalTestCase(name: "binary and encoded-data detection", body: testBinaryDetection),
             LocalTestCase(name: "Vaccine project sanitization", body: testVaccine),
             LocalTestCase(name: "invisible fragment revelation", body: testInvisibleFragmentRevelation),
+            LocalTestCase(name: "relational covert text channels", body: testCovertTextChannels),
             LocalTestCase(name: "text encoding and endianness", body: testTextEncoding),
             LocalTestCase(name: "Signature Hunt grouping and verification", body: testSignatureHunt),
             LocalTestCase(name: "Vaccine self-protection", body: testVaccineSelfProtection),
@@ -52,7 +54,9 @@ enum LocalTestRunner {
             LocalTestCase(name: "statistical watermark probe boundaries", body: testWatermarkProbe),
             LocalTestCase(name: "read-only file provenance inspection", body: testFileProvenance),
             LocalTestCase(name: "verified metadata copy cleaning", body: testMetadataCleaning),
+            LocalTestCase(name: "extended image container metadata", body: testExtendedImageContainers),
             LocalTestCase(name: "external pixel module contract", body: testExternalPixelModule),
+            LocalTestCase(name: "external statistical text detector contract", body: testExternalTextDetector),
             LocalTestCase(name: "built-in LSB pixel forensics", body: testPixelLSBBaseline),
             LocalTestCase(name: "built-in spectral pixel forensics", body: testPixelSpectralLab),
             LocalTestCase(name: "local rewrite boundaries", body: testLocalRewriteBoundaries),
@@ -60,6 +64,10 @@ enum LocalTestRunner {
             LocalTestCase(name: "bounded clipboard image import", body: testClipboardImageImport),
             LocalTestCase(name: "rewrite integrity boundaries", body: testRewriteIntegrity),
             LocalTestCase(name: "active clipboard protection", body: testActiveClipboardProtection),
+            LocalTestCase(name: "clipboard automation protocol", body: testClipboardAutomationProtocol),
+            LocalTestCase(name: "UUID privacy indicators", body: testOpaqueIdentifiers),
+            LocalTestCase(name: "explainable scam-attempt detection", body: testScamAttemptDetection),
+            LocalTestCase(name: "private adaptive copy model", body: testAdaptiveCopyModel),
             LocalTestCase(name: "bounded private clipboard history", body: testClipboardHistory),
             LocalTestCase(name: "English, Spanish, and Norwegian localization", body: testLocalization),
             LocalTestCase(name: "safe copyable finding reports", body: testFindingReports),
@@ -215,6 +223,13 @@ enum LocalTestRunner {
     private static func testCodeGuardFalsePositives() throws {
         let prose = CodeGuardAnalyzer.analyze("Let the reader review this ordinary sentence without source code.")
         try expect(!prose.isLikelyCode && prose.findings.isEmpty, "Ordinary prose was classified as code")
+        let matchAtProse = CodeGuardAnalyzer.analyze(
+            "Signal Sieve flagged a 39% match at https://example.com and requested manual review."
+        )
+        try expect(
+            !matchAtProse.isLikelyCode && matchAtProse.findings.isEmpty,
+            "Ordinary match-at prose was classified as Rust"
+        )
 
         let cyrillic = CodeGuardAnalyzer.analyze("let пароль = true;")
         try expect(cyrillic.isLikelyCode, "Valid Unicode code was not recognized")
@@ -365,6 +380,52 @@ enum LocalTestRunner {
         try expect(equivalence?.confidence == .low, "Damaged recovery was presented too confidently")
     }
 
+    private static func testCovertTextChannels() throws {
+        let alphabet: [UInt32] = [0x200B, 0x200C, 0x200D, 0x2060]
+        var base4Scalars: [Unicode.Scalar] = []
+        for byte in "Hi".utf8 {
+            for shift in stride(from: 6, through: 0, by: -2) {
+                let digit = Int((byte >> shift) & 0x03)
+                if let scalar = Unicode.Scalar(alphabet[digit]) {
+                    base4Scalars.append(scalar)
+                }
+            }
+        }
+        let base4 = "Visible" + String(String.UnicodeScalarView(base4Scalars))
+        let base4Finding = CovertTextChannelAnalyzer.analyze(base4).findings.first {
+            $0.kind == .zeroWidthBase4
+        }
+        try expect(base4Finding?.decodedPayload == "Hi", "Base-4 zero-width payload was not decoded")
+        try expect(
+            !CovertTextChannelAnalyzer.analyze(TextCleaner.clean(base4, mode: .safe).text).hasSuspiciousChannel,
+            "Safe Clean retained a detected base-4 channel"
+        )
+
+        var trailingLines: [String] = []
+        for byte in "OK".utf8 {
+            for shift in stride(from: 7, through: 0, by: -1) {
+                trailingLines.append("visible" + (((byte >> shift) & 1) == 0 ? " " : "\t"))
+            }
+        }
+        let trailing = trailingLines.joined(separator: "\n")
+        let trailingFinding = CovertTextChannelAnalyzer.analyze(trailing).findings.first {
+            $0.kind == .trailingWhitespace
+        }
+        try expect(trailingFinding?.decodedPayload == "OK", "Trailing-whitespace payload was not decoded")
+        let cleanedTrailing = TextCleaner.clean(trailing, mode: .safe)
+        try expect(cleanedTrailing.removedCount == 16, "Safe Clean did not remove every trailing carrier")
+        try expect(
+            !CovertTextChannelAnalyzer.analyze(cleanedTrailing.text).hasSuspiciousChannel,
+            "Safe Clean retained a trailing-whitespace channel"
+        )
+
+        let ordinary = "A normal paragraph with ordinary spaces.\n\tIndented text stays structural. 👨‍👩‍👧"
+        try expect(
+            CovertTextChannelAnalyzer.analyze(ordinary).findings.isEmpty,
+            "Ordinary text or emoji composition triggered the relational detector"
+        )
+    }
+
     private static func testTextEncoding() throws {
         let text = "let value\u{200B} = true\n"
         for encoding in TextEncodingKind.allCases {
@@ -494,6 +555,69 @@ enum LocalTestRunner {
             in: "https://l.facebook.com/l.php?u=\(destination)&h=signature"
         )
         try expect(facebook.text == "https://example.com/article?q=privacy", "Facebook redirect cleanup failed")
+
+        let snapchat = URLTrackerCleaner.cleanLinks(
+            in: "https://www.mywebsite.com/landing-page?utm_source=snapchat&ScCid=7b3a7917-a82a-47e8-9728-e1b3b045abb2"
+        )
+        try expect(
+            snapchat.text == "https://www.mywebsite.com/landing-page"
+                && snapchat.findings.contains { $0.platform == .snapchat },
+            "Snapchat ScCid cleanup failed"
+        )
+
+        let reddit = URLTrackerCleaner.cleanLinks(
+            in: "https://example.com/article?rdt_cid=abc123&q=privacy"
+        )
+        try expect(
+            reddit.text == "https://example.com/article?q=privacy"
+                && reddit.findings.contains { $0.platform == .reddit },
+            "Reddit attribution cleanup failed"
+        )
+
+        let threads = URLTrackerCleaner.cleanLinks(
+            in: "https://www.threads.com/@signal/post/DH123?xmt=AQG-share-token&view=compact"
+        )
+        try expect(
+            threads.text == "https://www.threads.com/@signal/post/DH123?view=compact",
+            "Threads domain-scoped cleanup failed"
+        )
+
+        let pinterest = URLTrackerCleaner.cleanLinks(
+            in: "https://www.myshop.org/checkout?epik=123abc456def789ghi&sku=42"
+        )
+        try expect(
+            pinterest.text == "https://www.myshop.org/checkout?sku=42"
+                && pinterest.findings.contains { $0.platform == .pinterest },
+            "Pinterest epik cleanup failed"
+        )
+
+        let linkedIn = URLTrackerCleaner.cleanLinks(
+            in: "https://www.linkedin.com/posts/example?utm_source=share&utm_medium=member_desktop&rcm=ACoAA-example"
+        )
+        try expect(
+            linkedIn.text == "https://www.linkedin.com/posts/example"
+                && linkedIn.findings.contains { $0.platform == .linkedin },
+            "LinkedIn share cleanup failed"
+        )
+
+        for shortLink in [
+            "https://www.reddit.com/r/privacy/s/AbCdEf1234",
+            "https://pin.it/4AbCdEf",
+            "https://lnkd.in/eAbCdEf",
+            "https://t.snapchat.com/AbCdEf12"
+        ] {
+            let result = URLTrackerCleaner.cleanLinks(in: shortLink)
+            try expect(
+                result.text == shortLink && result.unresolvedRedirectCount == 1,
+                "Opaque redirect was changed or not reported: \(shortLink)"
+            )
+        }
+
+        try expect(
+            LinkCoverageCatalog.entries.count == 20
+                && LinkCoverageCatalog.entries.filter(\.isPriority).count == 5,
+            "The visible platform coverage catalog is incomplete"
+        )
     }
 
     private static func testFunctionalURLPreservation() throws {
@@ -1127,8 +1251,8 @@ enum LocalTestRunner {
             ClipboardProtectionAnalyzer.alertPriority(
                 hiddenUnicodeRisk: medium.highestRiskLevel,
                 codeRisk: nil
-            ) == .standard,
-            "An orange finding was incorrectly promoted to a persistent alert"
+            ) == .elevated,
+            "An orange finding did not receive elevated alert treatment"
         )
         try expect(
             ClipboardProtectionAnalyzer.alertPriority(
@@ -1139,8 +1263,7 @@ enum LocalTestRunner {
         )
 
         let standardPriorityPairs: [(HiddenElementRiskLevel?, HiddenElementRiskLevel?)] = [
-            (nil, nil), (.suspicious, nil), (.medium, nil),
-            (nil, .suspicious), (nil, .medium), (.medium, .suspicious)
+            (nil, nil), (.suspicious, nil), (nil, .suspicious)
         ]
         for (hiddenRisk, codeRisk) in standardPriorityPairs {
             try expect(
@@ -1149,6 +1272,18 @@ enum LocalTestRunner {
                     codeRisk: codeRisk
                 ) == .standard,
                 "A non-red risk pair escaped the standard alert boundary"
+            )
+        }
+        let elevatedPriorityPairs: [(HiddenElementRiskLevel?, HiddenElementRiskLevel?)] = [
+            (.medium, nil), (nil, .medium), (.medium, .suspicious), (.suspicious, .medium)
+        ]
+        for (hiddenRisk, codeRisk) in elevatedPriorityPairs {
+            try expect(
+                ClipboardProtectionAnalyzer.alertPriority(
+                    hiddenUnicodeRisk: hiddenRisk,
+                    codeRisk: codeRisk
+                ) == .elevated,
+                "An orange risk pair escaped the elevated alert boundary"
             )
         }
         let highPriorityPairs: [(HiddenElementRiskLevel?, HiddenElementRiskLevel?)] = [
@@ -1162,6 +1297,100 @@ enum LocalTestRunner {
                 ) == .high,
                 "A red risk pair escaped the persistent alert boundary"
             )
+        }
+    }
+
+    private static func testClipboardAutomationProtocol() throws {
+        try expect(
+            ClipboardAutomationProtocol.persistedOrReviewAll(nil) == .reviewAll,
+            "A missing protocol did not fail closed to review-all"
+        )
+        try expect(
+            ClipboardAlertVisibilityPolicy.shouldPresent(.standard, visibility: .showAll),
+            "The visible setting hid a green/yellow warning"
+        )
+        try expect(
+            !ClipboardAlertVisibilityPolicy.shouldPresent(
+                .standard,
+                visibility: .hideGreenAndYellow
+            ),
+            "The quiet setting presented a green/yellow warning"
+        )
+        try expect(
+            ClipboardAlertVisibilityPolicy.shouldPresent(
+                .elevated,
+                visibility: .hideGreenAndYellow
+            ),
+            "The visibility setting hid an orange warning"
+        )
+        try expect(
+            !ClipboardAlertVisibilityPolicy.shouldPresent(.elevated, visibility: .redOnly),
+            "The red-only setting presented an orange warning"
+        )
+        try expect(
+            ClipboardAlertVisibilityPolicy.shouldPresent(.high, visibility: .redOnly),
+            "The visibility setting hid a mandatory red warning"
+        )
+        try expect(
+            !ClipboardAlertVisibilityPolicy.shouldIncludeCategory(
+                isEnabled: false,
+                highestRisk: .medium
+            ),
+            "A disabled category included a non-red warning"
+        )
+        try expect(
+            ClipboardAlertVisibilityPolicy.shouldIncludeCategory(
+                isEnabled: false,
+                highestRisk: .high
+            ),
+            "A disabled category hid a mandatory red warning"
+        )
+        try expect(
+            ClipboardAlertVisibilityPolicy.shouldIncludeScamCategory(
+                isEnabled: false,
+                threatLevel: .high
+            ),
+            "A disabled scam category hid a mandatory red warning"
+        )
+
+        let family = "👨\u{200D}👩\u{200D}👧"
+        let safe = ClipboardAutomationPolicy.transform(
+            "Family: \(family) hidden\u{200B}payload",
+            using: .safeClean,
+            isLikelyCode: false,
+            hasNonTextRepresentation: false,
+            isPrivacySensitive: false
+        )
+        try expect(safe.didChange, "Safe automation did not clean an actionable carrier")
+        try expect(
+            safe.text == "Family: \(family) hiddenpayload",
+            "Safe automation damaged contextual Unicode or kept a standalone carrier"
+        )
+
+        let strict = ClipboardAutomationPolicy.transform(
+            "Ｆｕｌｌｗｉｄｔｈ",
+            using: .strictClean,
+            isLikelyCode: false,
+            hasNonTextRepresentation: false,
+            isPrivacySensitive: false
+        )
+        try expect(strict.text == "Fullwidth", "Strict automation skipped NFKC normalization")
+
+        let skipCases: [(Bool, Bool, Bool, ClipboardAutomationSkipReason)] = [
+            (true, false, false, .sourceCode),
+            (false, true, false, .nonTextRepresentation),
+            (false, false, true, .privacySensitiveClipboard)
+        ]
+        for (isCode, hasNonText, isPrivate, expectedReason) in skipCases {
+            let result = ClipboardAutomationPolicy.transform(
+                "secret\u{200B}text",
+                using: .strictClean,
+                isLikelyCode: isCode,
+                hasNonTextRepresentation: hasNonText,
+                isPrivacySensitive: isPrivate
+            )
+            try expect(!result.didChange, "Automation crossed a protected clipboard boundary")
+            try expect(result.skipReason == expectedReason, "Automation reported the wrong skip reason")
         }
     }
 
@@ -1280,6 +1509,27 @@ enum LocalTestRunner {
 
     private static func testLocalization() throws {
         try expect(
+            AppTheme.system.appearanceOverride == .followSystem,
+            "Automatic theme retained a forced window appearance"
+        )
+        try expect(
+            AppTheme.light.appearanceOverride == .light
+                && AppTheme.dark.appearanceOverride == .dark
+                && AppTheme.iridescentPink.appearanceOverride == .light,
+            "Explicit themes lost their window appearance override"
+        )
+        try expect(
+            AppTheme.persistedOrSystem("iridescentPink") == .iridescentPink
+                && AppTheme.iridescentPink.usesIridescentPalette,
+            "Iridescent Pink did not persist as a distinct local palette"
+        )
+        try expect(
+            AppTheme.system.iconVariant(systemIsDark: false) == .light
+                && AppTheme.system.iconVariant(systemIsDark: true) == .dark
+                && AppTheme.iridescentPink.iconVariant(systemIsDark: false) == .iridescentPink,
+            "Application icon variants no longer follow the selected theme"
+        )
+        try expect(
             AppLocalization.text("Active Guard", language: .spanish) == "Protección activa",
             "Spanish interface translation is missing"
         )
@@ -1288,10 +1538,97 @@ enum LocalTestRunner {
             "Norwegian interface translation is missing"
         )
         try expect(
+            AppLocalization.text("Glossary", language: .spanish) == "Glosario",
+            "Spanish glossary translation is missing"
+        )
+        try expect(
+            AppLocalization.text("Community Engines", language: .spanish) == "Motores comunitarios"
+                && AppLocalization.text("Carrier Lab", language: .norwegianBokmal) == "Bærebølgelaboratorium",
+            "Community-engine or carrier-lab localization is missing"
+        )
+        try expect(
+            AppLocalization.text("My Usual Copy Patterns", language: .spanish)
+                == "Mis patrones habituales de copiado",
+            "Plain-language Spanish copy-pattern label is missing"
+        )
+        try expect(
             AppLocalization.format("Found %d elements to review.", language: .spanish, 4)
                 == "Se encontraron 4 elementos para revisar.",
             "Localized formatting lost its dynamic value"
         )
+    }
+
+    private static func testOpaqueIdentifiers() throws {
+        let analysis = OpaqueIdentifierAnalyzer.analyze(
+            "Reference:\n550e8400-e29b-41d4-a716-446655440000"
+        )
+        try expect(analysis.findings.count == 1, "UUID was not detected")
+        try expect(analysis.findings.first?.line == 2, "UUID line was incorrect")
+        try expect(analysis.findings.first?.column == 1, "UUID column was incorrect")
+        try expect(
+            !OpaqueIdentifierAnalyzer.analyze("550e8400-e29b-short").containsIdentifiers,
+            "Malformed UUID was accepted"
+        )
+    }
+
+    private static func testScamAttemptDetection() throws {
+        let sample = "AppIe. El lPhone 15 Plus en modo perdido fue ubicado hoy a las 11:47 Hrs. Ver ubicación: https://securityios.us/tvDb"
+        let analysis = ScamAttemptDetector.analyze(sample)
+        try expect(analysis.isPotentialScam, "Scam-style combination was not detected")
+        try expect(analysis.threatLevel == .high, "Scam-style combination was not high priority")
+        try expect(
+            analysis.signals.contains { $0.kind == .brandLookalike },
+            "Brand look-alike signal was missing"
+        )
+        try expect(
+            analysis.signals.contains { $0.kind == .brandDomainMismatch },
+            "Brand-domain mismatch was missing"
+        )
+
+        let legitimate = ScamAttemptDetector.analyze(
+            "Apple published an iPhone guide at https://support.apple.com/en-us/guide/iphone"
+        )
+        try expect(!legitimate.isPotentialScam, "Recognized Apple prose was falsely flagged")
+
+        let training = ScamAttemptDetector.analyze(
+            "This training note compares AppIe and lPhone as typography examples."
+        )
+        try expect(training.score == 40, "Repeated look-alikes inflated one signal class")
+        try expect(!training.isPotentialScam, "Educational look-alikes alone triggered a verdict")
+
+        let unicodeSpoof = ScamAttemptDetector.analyze(
+            "Αpple account locked. Sign in now at http://192.0.2.10/login"
+        )
+        try expect(
+            unicodeSpoof.signals.contains { $0.kind == .brandLookalike },
+            "Unicode-script brand look-alike was missed"
+        )
+    }
+
+    private static func testAdaptiveCopyModel() throws {
+        var model = AdaptiveCopyModel()
+        for index in 0..<AdaptiveCopyModel.minimumTrainingSamples {
+            let result = model.evaluateAndLearn(
+                "This is a calm ordinary paragraph number \(index) with consistent words and a short conclusion."
+            )
+            try expect(!result.isAnomalous, "Model alerted during warm-up")
+        }
+        let unusual = model.evaluateAndLearn(
+            "URGENT 9999 HTTPS://EXAMPLE.COM HTTPS://EXAMPLE.ORG $$$ !!! 1234567890\n\n\n\n\n"
+        )
+        try expect(unusual.isAnomalous, "Multi-feature anomaly was not detected")
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let url = directory.appendingPathComponent("model.json")
+        try AdaptiveCopyModelStore.save(model, to: url)
+        let serialized = try String(contentsOf: url, encoding: .utf8)
+        try expect(
+            !serialized.contains("URGENT"),
+            "Adaptive model persisted clipboard content"
+        )
+        let restored = try AdaptiveCopyModelStore.load(from: url)
+        try expect(restored == model, "Adaptive aggregate model did not round-trip")
     }
 
     private static func testSignedPack() throws {
@@ -1349,6 +1686,112 @@ enum LocalTestRunner {
         } catch VisualTransferError.emptyInput {
             return
         }
+    }
+
+    private static func testExtendedContextualUnicode() throws {
+        guard let noncharacter = Unicode.Scalar(0xFDD0) else {
+            throw LocalTestFailure.expectation("Swift rejected a valid Unicode noncharacter scalar")
+        }
+        let suspicious = HiddenTextAnalyzer.inspect("A\u{2065}B" + String(noncharacter) + "C\u{3164}D")
+        try expect(
+            suspicious.findings.map(\.kind) == [.reservedIgnorable, .noncharacter, .invisibleFiller],
+            "Extended default-ignorable carriers were not classified"
+        )
+        let hangul = HiddenTextAnalyzer.inspect("\u{1100}\u{3164}")
+        let khmer = HiddenTextAnalyzer.inspect("\u{1780}\u{17B4}")
+        let hieroglyph = HiddenTextAnalyzer.inspect("\u{13000}\u{13430}\u{13001}")
+        try expect(hangul.isClean && khmer.isClean && hieroglyph.isClean, "Functional script controls were not preserved")
+        let contextual = [
+            "\u{0600}\u{0661}",
+            "\u{110BD}\u{11083}",
+            "\u{1100}\u{115F}",
+            "\u{0F40}\u{200D}\u{0F42}",
+            "邊\u{FE00}"
+        ]
+        try expect(
+            contextual.allSatisfy { HiddenTextAnalyzer.inspect($0).isClean },
+            "A legitimate orthographic, Hangul, Tibetan, or CJK sequence was not preserved"
+        )
+        let carriers = HiddenTextAnalyzer.inspect("A\u{2061}B\u{206A}C\u{FFF9}D\u{E0001}EЖ\u{FE00}")
+        try expect(carriers.actionableFindings.count == 5, "An expanded Unicode carrier was missed")
+        try expect(
+            carriers.findings.map(\.displayName).contains("FUNCTION APPLICATION")
+                && carriers.findings.map(\.displayName).contains("LANGUAGE TAG"),
+            "Expanded Unicode carriers did not receive precise names"
+        )
+        try expect(
+            TextCleaner.clean("A\u{2061}B\u{206A}C\u{FFF9}D\u{E0001}EЖ\u{FE00}", mode: .safe).text == "ABCDEЖ",
+            "Safe Clean retained an expanded Unicode carrier"
+        )
+        let embedding = HiddenTextAnalyzer.inspect("English \u{202B}العربية\u{202C}")
+        let override = HiddenTextAnalyzer.inspect("English \u{202E}txt\u{202C}")
+        try expect(embedding.isClean, "Balanced bidi embedding was not recognized")
+        try expect(override.highestRiskLevel == .high, "Bidi override was treated as functional")
+    }
+
+    private static func testExtendedImageContainers() throws {
+        func appendLE32(_ value: UInt32, to data: inout Data) {
+            data.append(UInt8(value & 0xFF)); data.append(UInt8((value >> 8) & 0xFF))
+            data.append(UInt8((value >> 16) & 0xFF)); data.append(UInt8((value >> 24) & 0xFF))
+        }
+        func appendBE32(_ value: UInt32, to data: inout Data) {
+            data.append(UInt8((value >> 24) & 0xFF)); data.append(UInt8((value >> 16) & 0xFF))
+            data.append(UInt8((value >> 8) & 0xFF)); data.append(UInt8(value & 0xFF))
+        }
+        func chunk(_ type: String, _ payload: Data) -> Data {
+            var result = Data(type.utf8); appendLE32(UInt32(payload.count), to: &result); result.append(payload)
+            if payload.count & 1 == 1 { result.append(0) }
+            return result
+        }
+        func cleanThroughCopy(_ bytes: Data, named name: String) throws -> Data {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SignalSieveExtended-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let source = directory.appendingPathComponent(name)
+            let destination = directory.appendingPathComponent("clean-" + name)
+            try bytes.write(to: source)
+            _ = try FileMetadataCleaner.cleanCopy(of: source, to: destination)
+            return try Data(contentsOf: destination)
+        }
+        let image = chunk("VP8 ", Data([1, 2, 3, 4]))
+        var body = Data("WEBP".utf8); body.append(image); body.append(chunk("XMP ", Data("<x:xmpmeta/>".utf8)))
+        var webp = Data("RIFF".utf8); appendLE32(UInt32(body.count), to: &webp); webp.append(body)
+        let report = FileProvenanceAnalyzer.analyze(webp, fileName: "test.webp")
+        let cleaned = try cleanThroughCopy(webp, named: "test.webp")
+        try expect(report.format == .webp && report.findings.contains { $0.kind == .xmpMetadata }, "WebP XMP was not structurally detected")
+        try expect(cleaned.range(of: image) != nil, "WebP image payload changed during metadata cleaning")
+        try expect(FileProvenanceAnalyzer.analyze(cleaned, fileName: "clean.webp").findings.isEmpty, "WebP metadata remained after cleaning")
+
+        var bmp = Data([0x42, 0x4D, 26, 0, 0, 0, 0, 0, 0, 0, 26, 0, 0, 0, 12, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0]); bmp.append(Data("trailer".utf8))
+        try expect(FileProvenanceAnalyzer.analyze(bmp, fileName: "test.bmp").findings.contains { $0.kind == .trailingContainerData }, "BMP trailer was missed")
+        let cleanedBMP = try cleanThroughCopy(bmp, named: "test.bmp")
+        try expect(cleanedBMP.count == 26, "BMP trailer was not truncated to the declared boundary")
+
+        var avif = Data([0, 0, 0, 20]); avif.append(Data("ftypavif".utf8)); avif.append(Data([0, 0, 0, 0])); avif.append(Data("avif".utf8))
+        var carrier = Data(); appendBE32(24, to: &carrier); carrier.append(Data("uuid".utf8)); carrier.append(Data([0xD8, 0xFE, 0xC3, 0xD6, 0x1B, 0x0E, 0x48, 0x3C, 0x92, 0x97, 0x58, 0x28, 0x87, 0x7E, 0xC4, 0x81])); avif.append(carrier)
+        let avifReport = FileProvenanceAnalyzer.analyze(avif, fileName: "test.avif")
+        try expect(avifReport.format == .avif && avifReport.containsC2PAContainer, "AVIF C2PA UUID was not recognized")
+        let cleanAVIF = try cleanThroughCopy(avif, named: "test.avif")
+        try expect(cleanAVIF.count == avif.count, "AVIF cleaning shifted absolute media offsets")
+        try expect(!FileProvenanceAnalyzer.analyze(cleanAVIF, fileName: "clean.avif").containsC2PAContainer, "AVIF C2PA payload remained detectable")
+    }
+
+    private static func testExternalTextDetector() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SignalSieveTextModule-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let manifest = TextWatermarkModuleManifest(
+            schemaVersion: 1, name: "Fixture KGW", version: "1", executable: "detector.sh",
+            schemes: ["KGW"], verificationMode: .sameConfiguration,
+            requiresSecretKey: true, license: "Test-only"
+        )
+        try JSONEncoder().encode(manifest).write(to: directory.appendingPathComponent(ExternalTextWatermarkEngine.manifestFileName))
+        let executable = directory.appendingPathComponent("detector.sh")
+        try Data("#!/bin/sh\necho '{\"schemaVersion\":1,\"detector\":\"fixture\",\"scheme\":\"KGW\",\"statistic\":4.2,\"pValue\":0.0002,\"detected\":true,\"tokenCount\":180}'\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let module = try ExternalTextWatermarkEngine.loadModule(at: directory)
+        let result = try ExternalTextWatermarkEngine.detect("Local sample", using: module, timeout: 5)
+        try expect(result.detected == true && result.scheme == "KGW", "Compatible text detector result was not accepted")
     }
 
     private static func testVisualTransfer() throws {

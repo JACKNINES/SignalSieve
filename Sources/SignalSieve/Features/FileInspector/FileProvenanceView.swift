@@ -279,7 +279,7 @@ struct FileProvenanceView: View {
             Label(localized("Inspection boundaries"), systemImage: "info.circle.fill")
                 .font(.headline)
             Text(localized("SignalSieve identifies container structures and metadata markers. It does not yet validate C2PA signatures or infer authorship."))
-            Text(localized("Safe metadata cleaning supports PNG, JPEG, PDF, DOCX, and ODT. PDF pages, forms, links, image data, and document bodies are preserved; signed or encrypted documents are refused."))
+            Text(localized("Safe metadata cleaning supports common images, PDF, OOXML, EPUB, and ODT. A new copy is verified; signed, encrypted, malformed, or structurally ambiguous containers are refused."))
         }
         .font(.subheadline)
         .foregroundStyle(.secondary)

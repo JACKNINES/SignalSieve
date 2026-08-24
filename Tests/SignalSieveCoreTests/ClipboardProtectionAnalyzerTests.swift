@@ -15,8 +15,31 @@ func detectsClipboardRisks() {
     #expect(analysis.linkCleaning.text == "Read https://example.com/article?q=keep")
 }
 
-@Test("Only red findings receive persistent high-priority alerts")
-func assignsPersistentAlertPriorityOnlyToHighRisk() {
+@Test("Active protection flags opaque short links without pretending to clean them")
+func detectsOpaqueClipboardRedirect() {
+    let input = "Open https://pin.it/4AbCdEf"
+    let analysis = ClipboardProtectionAnalyzer.analyze(input, recentPatternTexts: [])
+
+    #expect(analysis.containsTrackedLinks)
+    #expect(analysis.linkCleaning.text == input)
+    #expect(analysis.linkCleaning.linksChanged == 0)
+    #expect(analysis.linkCleaning.unresolvedRedirectCount == 1)
+}
+
+@Test("Active protection combines UUID and scam-attempt analysis")
+func detectsClipboardThreatIntelligence() {
+    let analysis = ClipboardProtectionAnalyzer.analyze(
+        "AppIe: modo perdido. Ver ubicación https://securityios.us/tvDb id 550e8400-e29b-41d4-a716-446655440000",
+        recentPatternTexts: []
+    )
+
+    #expect(analysis.containsOpaqueIdentifiers)
+    #expect(analysis.containsPotentialScam)
+    #expect(analysis.identifierAnalysis.findings.count == 1)
+}
+
+@Test("Risk tiers distinguish standard, elevated, and persistent alerts")
+func assignsClipboardAlertTiers() {
     let medium = ClipboardProtectionAnalyzer.analyze(
         "ordinary text\u{200B}",
         recentPatternTexts: []
@@ -30,7 +53,7 @@ func assignsPersistentAlertPriorityOnlyToHighRisk() {
     #expect(ClipboardProtectionAnalyzer.alertPriority(
         hiddenUnicodeRisk: medium.inspection.highestRiskLevel,
         codeRisk: medium.codeAnalysis.highestRiskLevel
-    ) == .standard)
+    ) == .elevated)
     #expect(high.inspection.highestRiskLevel == .high)
     #expect(ClipboardProtectionAnalyzer.alertPriority(
         hiddenUnicodeRisk: high.inspection.highestRiskLevel,
@@ -40,6 +63,11 @@ func assignsPersistentAlertPriorityOnlyToHighRisk() {
         hiddenUnicodeRisk: nil,
         codeRisk: nil
     ) == .standard)
+    #expect(ClipboardProtectionAnalyzer.alertPriority(
+        hiddenUnicodeRisk: nil,
+        codeRisk: nil,
+        hasElevatedSignal: true
+    ) == .elevated)
 }
 
 @Test("Alert priority obeys the complete risk-boundary matrix")
@@ -47,17 +75,26 @@ func enforcesAlertPriorityBoundaryMatrix() {
     let standardPairs: [(HiddenElementRiskLevel?, HiddenElementRiskLevel?)] = [
         (nil, nil),
         (.suspicious, nil),
-        (.medium, nil),
-        (nil, .suspicious),
-        (nil, .medium),
-        (.medium, .suspicious),
-        (.suspicious, .medium)
+        (nil, .suspicious)
     ]
     for (hiddenRisk, codeRisk) in standardPairs {
         #expect(ClipboardProtectionAnalyzer.alertPriority(
             hiddenUnicodeRisk: hiddenRisk,
             codeRisk: codeRisk
         ) == .standard)
+    }
+
+    let elevatedPairs: [(HiddenElementRiskLevel?, HiddenElementRiskLevel?)] = [
+        (.medium, nil),
+        (nil, .medium),
+        (.medium, .suspicious),
+        (.suspicious, .medium)
+    ]
+    for (hiddenRisk, codeRisk) in elevatedPairs {
+        #expect(ClipboardProtectionAnalyzer.alertPriority(
+            hiddenUnicodeRisk: hiddenRisk,
+            codeRisk: codeRisk
+        ) == .elevated)
     }
 
     let highPairs: [(HiddenElementRiskLevel?, HiddenElementRiskLevel?)] = [

@@ -5,9 +5,18 @@ import PDFKit
 public enum ProvenanceFileFormat: String, Sendable, Equatable {
     case png = "PNG image"
     case jpeg = "JPEG image"
+    case webp = "WebP image"
+    case avif = "AVIF image"
+    case heic = "HEIC/HEIF image"
+    case bmp = "BMP image"
+    case gif = "GIF image"
+    case tiff = "TIFF image"
     case svg = "SVG image"
     case pdf = "PDF document"
     case docx = "Office Open XML document"
+    case xlsx = "Excel Open XML workbook"
+    case pptx = "PowerPoint Open XML presentation"
+    case epub = "EPUB publication"
     case odt = "OpenDocument Text document"
     case html = "HTML document"
     case markdown = "Markdown document"
@@ -28,6 +37,14 @@ public enum FileProvenanceFindingKind: String, Sendable, Equatable {
     case markdownFrontMatter = "Markdown front matter"
     case leadingContainerData = "Leading data before container"
     case extensionContentMismatch = "File extension and content mismatch"
+    case riffMetadata = "RIFF image metadata"
+    case isobmffMetadata = "ISO-BMFF image metadata"
+    case gifMetadata = "GIF extension metadata"
+    case tiffMetadata = "TIFF metadata tag"
+    case trailingContainerData = "Trailing data after image payload"
+    case epubMetadata = "EPUB metadata"
+    case embeddedResourceMetadata = "Embedded resource metadata"
+    case protectedContainer = "Signed or encrypted container"
 }
 
 public struct FileProvenanceFinding: Identifiable, Sendable, Equatable {
@@ -163,6 +180,9 @@ public enum FileProvenanceAnalyzer {
             inspectPNG(data, append: append)
         case .jpeg:
             inspectJPEG(data, append: append)
+        case .webp, .avif, .heic, .bmp, .gif, .tiff,
+             .xlsx, .pptx, .epub:
+            ExtendedContainerInspector.inspect(data, format: format, append: append)
         case .svg:
             inspectSVG(data, append: append)
         case .pdf:
@@ -204,10 +224,17 @@ public enum FileProvenanceAnalyzer {
         let extensionValue = (fileName as NSString).pathExtension.lowercased()
         if data.starts(with: pngSignature) { return .png }
         if data.starts(with: jpegSignature) { return .jpeg }
+        if ExtendedContainerInspector.isWebP(data) { return .webp }
+        if ExtendedContainerInspector.isBMP(data) { return .bmp }
+        if ExtendedContainerInspector.isGIF(data) { return .gif }
+        if ExtendedContainerInspector.isTIFF(data) { return .tiff }
+        if let format = ExtendedContainerInspector.isoImageFormat(data) { return format }
         if data.starts(with: pdfSignature) { return .pdf }
         if extensionValue == "pdf", pdfHeaderOffset(in: data) != nil { return .pdf }
-        if data.starts(with: zipSignature), extensionValue == "docx" { return .docx }
-        if data.starts(with: zipSignature), extensionValue == "odt" { return .odt }
+        if data.starts(with: zipSignature),
+           let format = ExtendedContainerInspector.zipFormat(data, extensionValue: extensionValue) {
+            return format
+        }
 
         let prefix = String(decoding: data.prefix(8_192), as: UTF8.self).lowercased()
         if extensionValue == "svg" || prefix.contains("<svg") { return .svg }
@@ -222,9 +249,18 @@ public enum FileProvenanceAnalyzer {
         switch (fileName as NSString).pathExtension.lowercased() {
         case "png": return .png
         case "jpg", "jpeg": return .jpeg
+        case "webp": return .webp
+        case "avif": return .avif
+        case "heic", "heif": return .heic
+        case "bmp": return .bmp
+        case "gif": return .gif
+        case "tif", "tiff": return .tiff
         case "svg": return .svg
         case "pdf": return .pdf
         case "docx": return .docx
+        case "xlsx": return .xlsx
+        case "pptx": return .pptx
+        case "epub": return .epub
         case "odt": return .odt
         case "html", "htm": return .html
         case "md", "markdown": return .markdown

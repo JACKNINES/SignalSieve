@@ -1,10 +1,16 @@
 # Signal Sieve
 
 <p align="center">
-  <img src="Packaging/SignalSieveIcon-1024.png" width="160" alt="Signal Sieve icon">
+  <img src="docs/images/signal-sieve-mark.png" width="180" alt="Signal Sieve lightning and SS mark">
 </p>
 
 <p align="center"><strong>Inspect what copied text and files carry before you share them.</strong></p>
+
+<p align="center">
+  <img src="docs/images/signal-sieve-overview.png" width="100%" alt="Signal Sieve reporting hidden Unicode in a neutral English project note">
+</p>
+
+<p align="center"><em>Local, explainable inspection for copied text, links, code, images, and files.</em></p>
 
 Signal Sieve is a privacy-first macOS app for inspecting copied text, code,
 links, and file-provenance metadata. Its analyzers make no network requests and
@@ -15,15 +21,44 @@ proof of authorship, malicious intent, AI generation, or guaranteed watermark
 removal. Please read [SECURITY.md](SECURITY.md) before using mutation features
 on important files.
 
+## See it in action
+
+Signal Sieve does not silently claim that a problem is fixed. Automatic
+cleaning is followed by a second local analysis, while link treatment reports
+separate removed tracking from parameters that may be functional. The
+screenshots below use synthetic English examples and reserved example domains;
+they contain no real account, organization, or third-party message data.
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/images/signal-sieve-active-guard.png" alt="Persistent red Active Guard alert showing that Safe Clean removed a hidden Unicode risk"><br>
+      <strong>Active Guard</strong><br>
+      Red alerts stay in front. The green status panel says whether automatic
+      cleaning removed the detected text risk.
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/images/signal-sieve-link-report.png" alt="Offline link report using neutral English examples on reserved domains"><br>
+      <strong>Link Treatment Report</strong><br>
+      Each URL shows what was removed and which parameters were preserved
+      because they may be functional. No destination is contacted.
+    </td>
+  </tr>
+</table>
+
 ## Features
 
 - Fresh installations start in English. The language menu switches instantly
   between English, Spanish, and Norwegian Bokmål, and the selected language is
   stored locally for later launches.
-- Follows the macOS appearance by default, with persistent Automatic, Light,
-  and Dark theme choices available from the toolbar.
-- Includes an original dark-blue Signal Sieve icon with a shield, signal, and
-  illuminated sieve.
+- The running application icon follows the selected appearance: black geometry
+  on white for Light, white geometry on black for Dark, and iridescent geometry
+  on pink for Iridescent Pink. Automatic follows the effective macOS light/dark
+  appearance and updates again when the system changes. The signed bundle keeps
+  the dark artwork as its stable Finder icon; runtime switching changes only
+  the active app and Dock representation.
+- Uses the original Signal Sieve lightning-and-sieve `SS` mark across the app,
+  its themed icons, and the project documentation.
 - **Active Guard:** watches for new clipboard content while SignalSieve is running and
   shows a local, actionable notice for hidden Unicode, source-code risks, known
   link trackers, or a repeated pattern across the latest three substantial
@@ -36,7 +71,8 @@ on important files.
 - Active Guard colors Unicode and code cards from their actual highest risk.
   Only red, high-risk alerts request immediate attention, move to the front,
   and remain above other windows until the user explicitly closes or reviews
-  them. Yellow and orange notices keep the standard non-persistent behavior.
+  them. Users can hide green and yellow notifications or hide every tier from
+  green through orange. Red alerts remain mandatory.
 - **Session Copy History:** keeps up to 50 recent text copies in local memory
   while Active Guard is running. Each entry shows its exact capture time,
   probable source application, a bounded visible preview, character count, and
@@ -67,17 +103,31 @@ on important files.
   replace future copied links after removing known tracking parameters. It
   verifies that the clipboard has not changed before replacing anything and
   skips automatic link cleaning when the copied text is source code.
-- Every warning card explains the finding and includes its own explicit
-  **Don't show this warning type again** checkbox. A disabled category can be
-  restored later from the **Active Guard** menu, and monitoring can also be
-  turned off completely.
-- Detects zero-width characters, bidirectional controls, variation selectors,
-  Unicode tags, control characters, unusual whitespace, private-use
+- **Copying Settings** can automatically apply Safe Clean or Strict Clean to
+  eligible copied text. The two modes are mutually exclusive. Automatic
+  cleaning skips source code, files, images, and privacy-sensitive clipboard
+  types, then reanalyzes the result before reporting whether alerts were
+  removed or remain. Alert visibility is a separate setting: users may hide
+  green and yellow alerts, or hide green through orange alerts. The two
+  visibility choices are mutually exclusive, and red alerts cannot be disabled.
+- Detects zero-width characters, invisible mathematical operators,
+  bidirectional and deprecated directional controls, variation selectors,
+  Unicode tags, script fillers, orthographic/layout controls, reserved
+  default-ignorables, noncharacters, unusual whitespace, private-use
   characters, and unassigned code points. Context classification distinguishes
-  functional emoji composition, script shaping, glyph variation, and bounded
-  bidirectional text from characters with no functional context. Green
-  contextual findings remain visible for audit but do not trigger warnings or
-  count as hidden-payload risk.
+  functional emoji composition, script shaping, orthographic marks, glyph
+  variation, notation layout, and bounded bidirectional text from floating
+  carriers. Green contextual findings remain visible for audit but do not
+  trigger warnings or count as hidden-payload risk. See
+  [UNICODE_SECURITY.md](UNICODE_SECURITY.md) for the ranges, cleaning policy,
+  and false-positive boundaries.
+- **Advanced Carrier Lab:** detects relationships that scalar-by-scalar scans
+  can miss: a four-symbol zero-width base-4 alphabet, binary alphabets made
+  from two space classes, spaces/tabs at line endings, and recurring Cyrillic
+  look-alikes inside predominantly Latin text. Decodable content and carrier
+  cadence are shown separately from confidence. Safe Clean neutralizes detected
+  zero-width, mixed-space, and trailing-whitespace channels; it does not guess
+  replacements for confusable visible letters.
 - Shows the Unicode code point and position of every finding.
 - Every analyzer can copy either its complete findings report or an individual
   finding in a compact plain-text format. Copied reports include risk,
@@ -91,7 +141,16 @@ on important files.
   functional parameters. This includes `utm_*`, `igsh`, `fbclid`, `gclid`, and
   other widely used campaign identifiers.
 - Applies host-scoped share-link rules for Instagram, YouTube, Facebook,
-  TikTok, and X, and unwraps known Facebook outbound redirects.
+  TikTok, X, Snapchat, Reddit, Threads, Pinterest, and LinkedIn, and unwraps
+  known Facebook outbound redirects.
+- Detects opaque short-link or redirect domains such as `redd.it`, Reddit
+  `/s/`, `pin.it`, `lnkd.in`, `t.snapchat.com`, and `t.co` without contacting
+  them. These remain unchanged and are reported as “detected but not
+  resolvable offline,” never as successfully cleaned.
+- Provides a visible 20-platform coverage matrix and a copyable treatment
+  report that distinguishes removed tracking, preserved functional parameters,
+  unresolved opaque redirects, and mechanisms outside clipboard scope. See
+  [LINK_TRACKING.md](LINK_TRACKING.md) for rule boundaries and source evidence.
 - **Pattern Memory:** compares up to ten recent texts for repeated phrases,
   sentence openings, list structures, and punctuation choices. Samples remain
   in memory for the current session only and disappear when the app exits.
@@ -108,12 +167,24 @@ on important files.
 - **Provider profiles:** keeps provider claims separate from local heuristics.
   The current Claude profile records the provider's documented scope while
   leaving the mechanism undisclosed and the compatible detector unintegrated.
-  Future detectors must enter through an explicit adapter boundary; Surface
-  Regularity is never treated as a provider detector.
+  Compatible local statistical detectors now enter through a versioned adapter
+  boundary. A selected KGW, SynthID-Text, keyed-Gumbel, or research module runs
+  against a private temporary text copy and must identify its exact scheme and
+  verification mode. Same-configuration results are never presented as vendor
+  attribution. See [TEXT_WATERMARK_MODULES.md](TEXT_WATERMARK_MODULES.md).
+- **Community Engines (optional):** connects explicitly to an independently
+  installed `watermarks-remover` core service on the fixed numeric loopback
+  address `127.0.0.1:8765`. The app supports its documented health,
+  capabilities, text inspection, and clean-copy routes; it never downloads,
+  launches, or updates the external project. Cleaned text is reanalyzed by
+  Signal Sieve before the user may place it in Result. Signal Sieve remains
+  fully usable without the service. Setup, update, licensing, and trust details
+  are in [COMMUNITY_ENGINES.md](COMMUNITY_ENGINES.md).
 - **File Provenance Inspector:** performs a bounded, read-only scan for C2PA
-  container markers and common EXIF, XMP, PNG, JPEG, SVG, PDF, DOCX, ODT, HTML,
-  and Markdown metadata structures. PDF inspection uses PDFKit plus structural
-  object references; DOCX and ODT parts are read through a bounded ZIP parser.
+  container markers and common EXIF/XMP or document metadata in PNG, JPEG,
+  WebP, AVIF, HEIC/HEIF, BMP, GIF, TIFF, SVG, PDF, DOCX, XLSX, PPTX, EPUB, ODT,
+  HTML, and Markdown. WebP RIFF chunks, GIF extensions, TIFF IFD tags, ISO-BMFF
+  boxes, and ZIP parts are parsed structurally with explicit size limits.
   It distinguishes a structurally detected container from cryptographic
   validation and does not include private metadata values in copied findings.
   Byte signatures take precedence over filename extensions; mismatches are
@@ -127,18 +198,25 @@ on important files.
   image; if it changed, a second explicit confirmation is required. The source
   bytes remain in inspector memory only. This removes container metadata, not
   watermarks encoded in the visible pixel values.
-- **Verified Clean Copy:** removes supported PNG, JPEG, PDF, DOCX, and ODT metadata
+- **Verified Clean Copy:** removes supported PNG, JPEG, WebP, AVIF/HEIC top-level
+  metadata boxes, BMP trailers, GIF extensions, TIFF direct metadata tags, PDF,
+  DOCX, XLSX, PPTX, EPUB, and ODT metadata
   only into a
   newly named file. It never overwrites the source or an existing destination,
   checks that the source did not change during the operation, reopens the saved
   copy, and reports the findings that remain. Color profiles and image data are
-  preserved. DOCX cleaning removes its dedicated `docProps` parts while keeping
-  the document body and potentially functional `customXml`; ODT receives an
+  preserved. OOXML cleaning removes dedicated property/custom-data parts while
+  keeping workbook, presentation, or document bodies; ODT receives an
   empty valid `meta.xml`. PDF cleaning uses a pinned, statically linked qpdf
   helper to remove Info, XMP Metadata, PieceInfo, and related modification
   markers, then checks page count, boxes, rotation, annotation types, and the
   reanalyzed output. Signed or encrypted PDFs and signed document packages are
-  refused because a safe rewrite cannot be verified.
+  refused because a safe rewrite cannot be verified. EPUB keeps required title,
+  language, and identifier metadata, refuses signed/encrypted publications, and
+  removes only optional tracking/provenance metadata plus safely cleanable
+  embedded images. TIFF EXIF/GPS pointer graphs are detected but refused for
+  cleaning when their payload ranges cannot be proven disjoint from pixels.
+  See [FORMAT_SECURITY.md](FORMAT_SECURITY.md) for the support matrix.
 - **Rewrite Integrity:** compares the current Input and Result locally. It
   reports exact additions or removals of numbers, dates, URLs, and quoted text,
   plus Unicode-aware lexical and length metrics. Semantic equivalence remains
@@ -225,36 +303,159 @@ on important files.
 - Vaccine recognizes the Signal Sieve source tree and installed app through
   stable internal identifiers. It permits read-only analysis but blocks any
   attempt to vaccinate itself, protecting intentional security test fixtures.
+- Vaccine currently runs through the macOS interface. The reusable core engine
+  does not yet ship a supported headless command or SARIF exporter, so CI jobs
+  cannot invoke or upload Vaccine findings directly without custom integration.
+  This is an automation limitation, not a weaker desktop scan.
 
 ## Requirements
 
-- macOS 13 or later.
-- Xcode Command Line Tools with Swift 6 or a compatible version.
-- Git and CMake for the pinned PDF-cleaning helper dependencies.
+- macOS 13 or later. A currently supported macOS release is recommended when
+  installing build tools through Homebrew.
+- Xcode Command Line Tools with Swift 6 or a compatible toolchain.
+- [Homebrew](https://brew.sh/) to install the command-line build dependency.
+- CMake and Git. The steps below install both with Homebrew.
+- An internet connection for the first build, because the bootstrap script
+  clones pinned qpdf and libjpeg-turbo source revisions.
 - Ollama is optional and used only for an explicitly requested local rewrite.
+  Signal Sieve's inspection and deterministic cleaning features do not require
+  Ollama. See [OLLAMA.md](OLLAMA.md) for installation, in-app usage, privacy
+  boundaries, troubleshooting, and the optional real-model smoke test.
 
-## Build and run
+## Install from a Git clone
 
-Clone the repository, build the pinned PDF dependencies once, and package the
-application:
+These instructions build Signal Sieve locally. They do not disable Gatekeeper
+or change macOS security settings.
+
+### 1. Install Apple's command-line tools
+
+Open **Terminal** and run:
 
 ```sh
+xcode-select --install
+```
+
+If macOS says the tools are already installed, continue to the next step. You
+can verify the active toolchain with:
+
+```sh
+xcode-select -p
+swift --version
+```
+
+### 2. Install Homebrew
+
+If `brew --version` already works, skip this step. Otherwise, use the official
+installer from [brew.sh](https://brew.sh/):
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+Read the installer's summary before approving it. When it finishes, run the
+`brew shellenv` command it prints so that Terminal can find Homebrew, then
+verify the installation:
+
+```sh
+brew --version
+```
+
+### 3. Install CMake and Git
+
+```sh
+brew update
+brew install cmake git
+cmake --version
+git --version
+```
+
+Homebrew is the installer; CMake is required to compile the pinned PDF helper.
+Git is used both to clone Signal Sieve and to fetch its pinned qpdf and
+libjpeg-turbo sources.
+
+### 4. Clone Signal Sieve
+
+```sh
+git clone https://github.com/JACKNINES/SignalSieve.git
 cd SignalSieve
+```
+
+### 5. Build the pinned PDF dependencies
+
+Run this once after cloning, and again only when those pinned dependencies
+change:
+
+```sh
 ./bootstrap-pdf-tools.sh
+```
+
+The script checks out exact upstream revisions and compiles static local
+artifacts under `.build/vendor`. It does not add a qpdf or libjpeg runtime
+dependency to the packaged app.
+
+### 6. Build the macOS application
+
+```sh
 ./package-app.sh
+```
+
+The finished bundle is created at:
+
+```text
+.build/app/Signal Sieve.app
+```
+
+### 7. Open Signal Sieve
+
+```sh
 open ".build/app/Signal Sieve.app"
 ```
 
-You can also double-click `run.command` in Finder. On its first run it builds
-the pinned PDF dependencies, creates a locally signed `.app` bundle, and opens
-it. Local ad-hoc signing verifies the bundle's integrity on the same Mac; it is
-not an Apple Developer ID signature or notarization for public distribution.
+Because a clone build is locally ad-hoc signed rather than notarized with an
+Apple Developer ID, macOS may ask you to confirm the first launch. In Finder,
+Control-click **Signal Sieve.app**, choose **Open**, review the macOS notice,
+and choose **Open** again. Do not disable Gatekeeper.
+
+To keep the app, drag `.build/app/Signal Sieve.app` into your Applications
+folder. Signal Sieve can remain active in the background after its main window
+is closed; use the application menu to quit it completely.
+
+### One-command rebuild
+
+After the prerequisites are installed, you can also double-click `run.command`
+in Finder or run it from Terminal:
+
+```sh
+./run.command
+```
+
+On its first run, it builds missing pinned PDF dependencies, creates the local
+`.app` bundle, and opens it. Later runs rebuild the current source.
+
+### Verify the build
 
 For a release-style local verification, run `./quality-gate.sh`. It compiles
 with warnings as errors, runs the local unit/integration suite, packages and
 validates the app, checks shell syntax, verifies private-framework linkage and
 code signing, and enforces static privacy restrictions against adding an
 in-process network client or source/test symlinks.
+
+```sh
+./quality-gate.sh
+```
+
+### Troubleshooting
+
+- **`brew: command not found`:** run the `brew shellenv` line printed by the
+  Homebrew installer, close Terminal, and open it again.
+- **`Missing build dependency: cmake`:** run `brew install cmake` and confirm
+  that `cmake --version` succeeds.
+- **Command Line Tools are missing or stale:** run `xcode-select --install`,
+  install the offered update, and retry.
+- **The first dependency build takes time:** qpdf and libjpeg-turbo are compiled
+  locally once; later application rebuilds reuse `.build/vendor`.
+- **macOS blocks the first launch:** use Finder's Control-click **Open** flow.
+  Do not remove quarantine attributes globally or disable Gatekeeper.
 
 With a complete Xcode installation, you may also use:
 
@@ -283,6 +484,14 @@ Run only the local compiler-compatible test runner:
 ./test-local.sh
 ```
 
+If Ollama and a local model are installed, run the optional end-to-end rewrite
+test separately. It is not part of the mandatory gate because Ollama remains an
+optional companion:
+
+```sh
+./ollama-smoke-test.sh qwen3.5:4b
+```
+
 Run the reusable, read-only real-file quality harness against a directory. It
 uses bounded temporary copies for Vaccine and clean-copy verification, removes
 them afterward, and never rewrites the corpus:
@@ -307,19 +516,33 @@ privacy- and mutation-sensitive Unicode, clipboard, file, Vaccine, rewrite,
 and external-module restriction tests with Swift Testing's real `@Test`
 macros.
 
+The Unicode regression suite includes both malicious carriers and legitimate
+context controls. It checks invisible operators, deprecated bidi controls,
+interlinear annotations, language tags, Hangul fillers, Arabic/Syriac/Kaithi
+orthographic controls, Tibetan joiners, CJK variation selectors, and existing
+emoji/tag sequences. A release gate must prove that Safe Clean removes the
+floating carriers while preserving the functional fixtures.
+
 ## Project structure
 
 - `Sources/SignalSieveCore`: deterministic analysis, cleaning, rule, URL, and OCR
   components with no UI state.
 - `Sources/SignalSieve`: SwiftUI composition, focused views, and the app view
   model.
+- `docs/images`: privacy-safe screenshots used by this README.
+- `docs/images/README.md`: reproducible rules for cursor-free, high-resolution,
+  brand-neutral documentation captures.
 - `Packaging`: macOS application metadata used to create `Signal Sieve.app`.
 - `Tests/SignalSieveCoreTests`: fine-grained Swift Testing unit suite.
 - `Tests/LocalTestRunner`: dependency-free fallback and OCR integration runner.
 - `Tests/CorpusQualityRunner`: bounded real-file invariants for provenance,
   Vaccine, image regeneration, and verified clean copies.
+- `Tests/CommunityEngineIntegrationRunner`: explicit synthetic smoke test for a
+  separately running compatible community service.
 - `ADVANCED_ROADMAP.md`: strict format, controlled-harness, learned-pixel,
   API, and container acceptance criteria.
+- `COMMUNITY_ENGINES.md`: optional local-service setup, versioning, privacy,
+  licensing, and adapter trust boundaries.
 
 Continuous integration builds with warnings as errors and runs the Swift
 Testing suite on macOS for every push and pull request.
@@ -385,3 +608,6 @@ flags; review its source, license, model provenance, and privacy behavior first.
 
 Pattern Memory reports observable correlation only. Its findings are not proof
 of authorship, AI generation, or the presence of a watermark.
+Community engines are separate local processes. Their findings inherit the
+limits of the selected detector and configuration, and loopback does not
+sandbox untrusted code. Signal Sieve does not silently install or update them.

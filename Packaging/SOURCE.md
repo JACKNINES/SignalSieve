@@ -12,3 +12,6 @@ providing recipients a stable, public source location, as required by MPL-2.0.
 
 The Signal Sieve name and logos remain subject to the separately bundled
 `TRADEMARKS.md` policy.
+
+The current application-icon concept was created by JACKNINES and refined into
+the Light, Dark, and Iridescent Pink production colorways for Signal Sieve.

@@ -122,3 +122,107 @@ func preservesTrailingPunctuation() {
 
     #expect(result.text == "See (https://example.com/article), then continue.")
 }
+
+@Test("Cleans Snapchat click IDs using the documented ScCid shape")
+func cleansSnapchatClickID() {
+    let input = "https://www.mywebsite.com/landing-page?utm_source=snapchat&ScCid=7b3a7917-a82a-47e8-9728-e1b3b045abb2"
+    let result = URLTrackerCleaner.cleanLinks(in: input)
+
+    #expect(result.text == "https://www.mywebsite.com/landing-page")
+    #expect(result.removedParameterCount == 2)
+    #expect(result.findings.contains {
+        $0.platform == .snapchat && Set($0.parameterNames.map { $0.lowercased() }) == ["utm_source", "sccid"]
+    })
+}
+
+@Test("Cleans Reddit attribution while preserving a functional destination parameter")
+func cleansRedditAttribution() {
+    let input = "https://example.com/article?rdt_cid=abc123&q=privacy"
+    let result = URLTrackerCleaner.cleanLinks(in: input)
+
+    #expect(result.text == "https://example.com/article?q=privacy")
+    #expect(result.findings.contains { $0.platform == .reddit && $0.treatment == .removed })
+    #expect(result.findings.contains {
+        $0.treatment == .preservedFunctional && $0.parameterNames == ["q"]
+    })
+}
+
+@Test("Reports Reddit share redirects without resolving them")
+func reportsOpaqueRedditShareLink() {
+    let input = "https://www.reddit.com/r/privacy/s/AbCdEf1234"
+    let result = URLTrackerCleaner.cleanLinks(in: input)
+
+    #expect(result.text == input)
+    #expect(result.linksChanged == 0)
+    #expect(result.linksFlagged == 1)
+    #expect(result.unresolvedRedirectCount == 1)
+    #expect(result.findings.contains {
+        $0.platform == .reddit && $0.treatment == .detectedOfflineUnresolvable
+    })
+}
+
+@Test("Scopes Threads share identifiers to Threads domains")
+func cleansThreadsShareIdentifier() {
+    let threads = URLTrackerCleaner.cleanLinks(
+        in: "https://www.threads.com/@signal/post/DH123?xmt=AQG-share-token&view=compact"
+    )
+    let unrelated = URLTrackerCleaner.cleanLinks(
+        in: "https://example.com/article?xmt=must-stay"
+    )
+
+    #expect(threads.text == "https://www.threads.com/@signal/post/DH123?view=compact")
+    #expect(threads.removedParameterCount == 1)
+    #expect(unrelated.text == "https://example.com/article?xmt=must-stay")
+}
+
+@Test("Cleans Pinterest epik attribution and flags pin.it offline")
+func cleansPinterestAndReportsShortLink() {
+    let destination = URLTrackerCleaner.cleanLinks(
+        in: "https://www.myshop.org/checkout?epik=123abc456def789ghi&sku=42"
+    )
+    let shortLink = "https://pin.it/4AbCdEf"
+    let opaque = URLTrackerCleaner.cleanLinks(in: shortLink)
+
+    #expect(destination.text == "https://www.myshop.org/checkout?sku=42")
+    #expect(destination.findings.contains { $0.platform == .pinterest && $0.treatment == .removed })
+    #expect(opaque.text == shortLink)
+    #expect(opaque.unresolvedRedirectCount == 1)
+}
+
+@Test("Cleans LinkedIn share attribution and flags lnkd.in offline")
+func cleansLinkedInAndReportsShortLink() {
+    let input = "https://www.linkedin.com/posts/richardhurtley_startupjourney-founderstories-universityofexeter-activity-7384124628631457792-Mk9s?utm_source=share&utm_medium=member_desktop&rcm=ACoAA-example"
+    let result = URLTrackerCleaner.cleanLinks(in: input)
+    let opaque = URLTrackerCleaner.cleanLinks(in: "https://lnkd.in/eAbCdEf")
+
+    #expect(result.text == "https://www.linkedin.com/posts/richardhurtley_startupjourney-founderstories-universityofexeter-activity-7384124628631457792-Mk9s")
+    #expect(result.removedParameterCount == 3)
+    #expect(result.findings.contains { $0.platform == .linkedin && $0.parameterNames.contains("rcm") })
+    #expect(opaque.unresolvedRedirectCount == 1)
+}
+
+@Test("Detects Snapchat and X opaque redirect domains without network access")
+func reportsAdditionalOpaqueRedirects() {
+    for (url, platform) in [
+        ("https://t.snapchat.com/AbCdEf12", TrackedLinkPlatform.snapchat),
+        ("https://t.co/AbCdEf12", TrackedLinkPlatform.x)
+    ] {
+        let result = URLTrackerCleaner.cleanLinks(in: url)
+        #expect(result.text == url)
+        #expect(result.unresolvedRedirectCount == 1)
+        #expect(result.findings.contains { $0.platform == platform })
+    }
+}
+
+@Test("Publishes a complete twenty-platform offline coverage matrix")
+func publishesCoverageMatrix() {
+    #expect(LinkCoverageCatalog.entries.count == 20)
+    #expect(LinkCoverageCatalog.entries.map(\.platform) == [
+        .facebook, .youtube, .whatsapp, .instagram, .tiktok, .wechat,
+        .reddit, .x, .linkedin, .telegram, .snapchat, .pinterest,
+        .discord, .douyin, .threads, .vk, .tumblr, .twitch, .line, .fourChan
+    ])
+    #expect(LinkCoverageCatalog.entries.filter(\.isPriority).map(\.platform) == [
+        .reddit, .linkedin, .snapchat, .pinterest, .threads
+    ])
+}

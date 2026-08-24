@@ -23,3 +23,12 @@ sanitizer.
 
 These notices are informational and do not replace the complete license texts
 shipped with the built application.
+
+## Optional external community service
+
+Signal Sieve contains an adapter for a user-installed local instance of
+[`guillaumemeyer/watermarks-remover`](https://github.com/guillaumemeyer/watermarks-remover).
+No source code, container image, model, or executable from that project is
+vendored or distributed here. The external project and each optional upstream
+harness retain their own licenses and notices. Consult the exact revision or
+container tag you install; the adapter does not replace those terms.

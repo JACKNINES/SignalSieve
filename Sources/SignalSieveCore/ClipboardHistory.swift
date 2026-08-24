@@ -13,7 +13,10 @@ public struct ClipboardHistoryEntry: Identifiable, Sendable, Equatable {
     public let codeRiskCount: Int
     public let trackedLinkCount: Int
     public let binaryKind: BinaryContentKind?
+    public let scamSignalCount: Int
+    public let scamThreatLevel: ScamThreatLevel?
     public let wasAutomaticallyCleaned: Bool
+    public let automaticCleaningAudit: ClipboardAutomaticCleaningAudit?
 
     public init(
         id: UUID = UUID(),
@@ -27,7 +30,10 @@ public struct ClipboardHistoryEntry: Identifiable, Sendable, Equatable {
         codeRiskCount: Int,
         trackedLinkCount: Int,
         binaryKind: BinaryContentKind?,
-        wasAutomaticallyCleaned: Bool
+        scamSignalCount: Int = 0,
+        scamThreatLevel: ScamThreatLevel? = nil,
+        wasAutomaticallyCleaned: Bool,
+        automaticCleaningAudit: ClipboardAutomaticCleaningAudit? = nil
     ) {
         self.id = id
         self.capturedAt = capturedAt
@@ -40,7 +46,10 @@ public struct ClipboardHistoryEntry: Identifiable, Sendable, Equatable {
         self.codeRiskCount = codeRiskCount
         self.trackedLinkCount = trackedLinkCount
         self.binaryKind = binaryKind
+        self.scamSignalCount = max(0, scamSignalCount)
+        self.scamThreatLevel = scamThreatLevel
         self.wasAutomaticallyCleaned = wasAutomaticallyCleaned
+        self.automaticCleaningAudit = automaticCleaningAudit
     }
 
     public var visiblePreview: String {
@@ -52,6 +61,8 @@ public struct ClipboardHistoryEntry: Identifiable, Sendable, Equatable {
             || codeRiskCount > 0
             || trackedLinkCount > 0
             || binaryKind != nil
+            || scamSignalCount > 0
+            || (automaticCleaningAudit?.originalAlertCount ?? 0) > 0
     }
 }
 
@@ -69,7 +80,10 @@ public enum ClipboardHistory {
         codeRiskCount: Int,
         trackedLinkCount: Int,
         binaryKind: BinaryContentKind?,
-        wasAutomaticallyCleaned: Bool
+        scamSignalCount: Int = 0,
+        scamThreatLevel: ScamThreatLevel? = nil,
+        wasAutomaticallyCleaned: Bool,
+        automaticCleaningAudit: ClipboardAutomaticCleaningAudit? = nil
     ) -> ClipboardHistoryEntry {
         let characterCount = text.count
         let stored = String(text.prefix(maximumStoredCharacters))
@@ -84,7 +98,10 @@ public enum ClipboardHistory {
             codeRiskCount: codeRiskCount,
             trackedLinkCount: trackedLinkCount,
             binaryKind: binaryKind,
-            wasAutomaticallyCleaned: wasAutomaticallyCleaned
+            scamSignalCount: scamSignalCount,
+            scamThreatLevel: scamThreatLevel,
+            wasAutomaticallyCleaned: wasAutomaticallyCleaned,
+            automaticCleaningAudit: automaticCleaningAudit
         )
     }
 

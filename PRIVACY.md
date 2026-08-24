@@ -7,8 +7,13 @@ SignalSieve is designed around local processing and data minimization.
 - Text inspection, Code Guard, cleaning, Pattern Memory, Surface Regularity,
   Rewrite Integrity, file-provenance inspection, and OCR run locally.
 - Contextual Unicode analysis keeps functional emoji composition, script
-  shaping, glyph variation, and bounded bidirectional marks distinguishable
-  from actionable hidden-text findings.
+  shaping, orthographic controls, glyph variation, notation layout, and bounded
+  bidirectional marks distinguishable from actionable hidden-text findings.
+  The analyzer operates on Unicode scalar values and neighboring context in
+  memory; it does not query a remote Unicode service.
+- Advanced Carrier Lab performs bounded relational analysis locally. Decoded
+  carrier content remains in the current view and is not saved or submitted to
+  a provider.
 - Pattern Memory keeps up to ten raw samples in process memory only.
 - Pattern Memory samples are discarded when the application exits or the user
   chooses **Clear Session Memory**.
@@ -32,13 +37,16 @@ SignalSieve is designed around local processing and data minimization.
 - The File Provenance Inspector uses bounded reads and bounded archive-entry
   extraction for a file chosen explicitly by the user. It reports container
   names and structural markers, not private metadata values. Supported PNG,
-  JPEG, PDF, DOCX, and ODT cleaning always creates and reanalyzes a new file;
-  the source is never overwritten. Signed document packages and signed,
-  encrypted, or structurally damaged PDFs are refused.
+  JPEG, WebP, AVIF/HEIC, BMP, GIF, TIFF, PDF, DOCX, XLSX, PPTX, EPUB, and ODT
+  cleaning always creates and reanalyzes a new file; the source is never
+  overwritten. Signed document packages and signed, encrypted, or structurally
+  damaged PDFs are refused.
 - Rewrite Integrity receives only the existing in-memory Input and Result and
   stores no comparison after the app exits. Optional rewriting invokes only an
   already-installed Ollama command and pins its API host to loopback; Signal
-  Sieve never downloads a missing model automatically.
+  Sieve never downloads a missing model automatically. The optional integration
+  smoke test uses fixed synthetic prose and logs measurements rather than the
+  generated text.
 - Automatic link cleaning replaces clipboard text only when a known tracking
   parameter was removed and the clipboard still contains the text that was
   analyzed. This prevents a delayed action from overwriting a newer copy.
@@ -48,9 +56,8 @@ SignalSieve is designed around local processing and data minimization.
 - Active Guard, each warning category, and automatic link cleaning are
   controlled independently from the app. Preferences are stored locally; copied
   text is not included in those preferences.
-- The selected interface language and appearance are stored as short local
-  preferences (`en`, `es`, or `nb`; `system`, `light`, or `dark`) and contain
-  no processed text.
+- The selected interface language is stored as a short local preference (`en`,
+  `es`, or `nb`) and contains no processed text.
 - The packaged app migrates only the known protection and language preferences
   from the earlier executable build. It never migrates clipboard contents or
   Pattern Memory samples.
@@ -68,7 +75,8 @@ SignalSieve is designed around local processing and data minimization.
 
 ## Network boundaries
 
-- Cleaning and analysis make no network requests.
+- Native cleaning and analysis make no network requests. Optional local
+  integrations are separate, explicit boundaries described below.
 - Clicking a Unicode or Code Guard finding explicitly opens a DuckDuckGo query
   in the user's browser. The query contains only the Unicode code, name, and
   category—never the copied text, source code, or identifier.
@@ -79,6 +87,17 @@ SignalSieve is designed around local processing and data minimization.
   appended to that URL.
 - Automatic community-rule downloads are disabled until a trusted signer and
   transparent update source are configured.
+- Community Engines checks only `http://127.0.0.1:8765/health` when its panel
+  opens. It sends the current text to that local process only after the user
+  chooses inspect or clean. Signal Sieve accepts no configurable remote host,
+  strips proxy variables, does not follow a community-engine update feed, and
+  never starts or downloads the external project. The independently installed
+  service can still read the text explicitly sent to it and must be trusted as
+  a separate local process. See [COMMUNITY_ENGINES.md](COMMUNITY_ENGINES.md).
+- Vaccine does not currently export SARIF or run as a supported headless CLI.
+  Consequently, no scan report is uploaded automatically. A future CI exporter
+  must be opt-in and disclose that uploading SARIF shares file paths, locations,
+  rule identifiers, and messages with the selected CI provider.
 - Pixel Watermark Lab bundles model-free LSB and spectral-carrier modules that
   run as signed local helpers without network code. Inputs are staged as temporary
   copies and outputs must be new files. Optional third-party modules remain an

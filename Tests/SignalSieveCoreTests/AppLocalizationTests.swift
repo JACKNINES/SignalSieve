@@ -16,6 +16,15 @@ func restoresStoredLanguageSelection() {
     #expect(AppLanguage.persistedOrEnglish("nb") == .norwegianBokmal)
 }
 
+@Test("Application icon follows explicit and automatic themes")
+func mapsThemesToApplicationIcons() {
+    #expect(AppTheme.light.iconVariant(systemIsDark: true) == .light)
+    #expect(AppTheme.dark.iconVariant(systemIsDark: false) == .dark)
+    #expect(AppTheme.iridescentPink.iconVariant(systemIsDark: true) == .iridescentPink)
+    #expect(AppTheme.system.iconVariant(systemIsDark: false) == .light)
+    #expect(AppTheme.system.iconVariant(systemIsDark: true) == .dark)
+}
+
 @Test("Spanish and Norwegian interface translations are available")
 func translatesPrimaryInterfaceText() {
     #expect(
@@ -86,7 +95,81 @@ func translatesPrimaryInterfaceText() {
         "Produces reviewable output. Code is never modified automatically.",
         "Expand Input to full width",
         "Expand Result to full width",
-        "Restore both panels"
+        "Restore both panels",
+        "Privacy & Threat Insights",
+        "Possible scam attempt detected",
+        "Warn About Opaque Identifiers",
+        "Warn About Possible Scam Attempts",
+        "Learn Personal Baseline Locally",
+        "Reset Personal Baseline",
+        "Don't show opaque-identifier warnings again",
+        "Don't show possible-scam warnings again",
+        "Turn off Personal Baseline learning and warnings",
+        "Clipboard Protocol",
+        "Don't show standard warnings again",
+        "Automatically Safe Clean copied text",
+        "Automatically Strict Clean copied text",
+        "These choices are mutually exclusive. Uncheck the selected option to restore all enabled warnings without automatic text cleaning.",
+        "Automatic text cleaning skips source code, files, images, and privacy-sensitive clipboard types.",
+        "Select one protocol. Leave all three unchecked to show every enabled warning without automatic text cleaning.",
+        "Red high-risk alerts always remain visible.",
+        "Review all enabled warnings",
+        "High-risk alerts only",
+        "Automatic Safe Clean",
+        "Automatic Strict Clean",
+        "Copying Settings",
+        "Stop showing green and yellow alerts",
+        "Stop showing green through orange alerts",
+        "Red alerts always appear, even when their warning category is turned off.",
+        "Orange and red alerts remain visible. Red alerts cannot be disabled.",
+        "Only red alerts remain visible. Red alerts cannot be disabled.",
+        "Alert visibility choices are mutually exclusive.",
+        "Automatic cleaning: %@",
+        "Off",
+        "Safe Clean and Strict Clean are mutually exclusive. Alert visibility is a separate setting.",
+        "Eligible future text copies are Safe Cleaned. Alert visibility is controlled separately.",
+        "Eligible future text copies are Strict Cleaned. Emoji and some writing systems may change. Alert visibility is controlled separately.",
+        "Green and yellow alerts are hidden. Orange and red alerts remain mandatory.",
+        "Green and yellow alerts are visible again. Orange and red alerts remain mandatory.",
+        "Green through orange alerts are visible. Red alerts remain mandatory.",
+        "Green through orange alerts are hidden. Only mandatory red alerts will appear.",
+        "Automatic text cleaning is off. Alert visibility is unchanged.",
+        "Safe Clean is now automatic for eligible future text copies. Alert visibility is unchanged.",
+        "Strict Clean is now automatic for eligible future text copies. Alert visibility is unchanged.",
+        "%@ removed the detected red text risk from the current clipboard",
+        "%@ did not remove every red finding",
+        "The clipboard text was reanalyzed after cleaning and no red text finding remained. Still use caution: the original source may have malicious intent.",
+        "A red finding remains or automatic cleaning was skipped. Do not trust the content solely because cleaning is enabled; its source may have malicious intent.",
+        "%@ · alerts cleaned successfully",
+        "%@ · some alerts cleaned",
+        "%@ · alerts remain",
+        "%@ · cleaning skipped",
+        "Possible scam · %d signal(s)",
+        "%@ reanalysis: %d original alert(s), none remaining after automatic cleaning.",
+        "%@ reanalysis: %d original alert(s), %d remaining after automatic cleaning.",
+        "Automatically use Safe Clean for copied text",
+        "Automatically use Strict Clean for copied text",
+        "My Usual Copy Patterns",
+        "Learn my usual copy patterns on this Mac",
+        "Learning usual patterns · %d/%d+ copies",
+        "Forget learned copy patterns",
+        "This copy looks different from your usual copies",
+        "Glossary",
+        "Plain-language explanations of SignalSieve terms.",
+        "Search terms",
+        "Red alert",
+        "Tracking parameter",
+        "Metadata",
+        "Link Coverage",
+        "Link Tracking Coverage",
+        "Coverage matrix",
+        "Removed",
+        "Detected but not resolvable offline",
+        "Preserved because it may be functional",
+        "Outside clipboard scope",
+        "Copy Link Report",
+        "Opaque redirect or short link detected",
+        "Review Link Report"
     ]
     for key in popupKeys {
         #expect(AppLocalization.text(key, language: .spanish) != key)
@@ -150,6 +233,15 @@ func restoresStoredThemeSelection() {
     #expect(AppTheme.persistedOrSystem("system") == .system)
     #expect(AppTheme.persistedOrSystem("light") == .light)
     #expect(AppTheme.persistedOrSystem("dark") == .dark)
+    #expect(AppTheme.persistedOrSystem("iridescentPink") == .iridescentPink)
+}
+
+@Test("Automatic appearance clears any forced window theme")
+func mapsThemeToWindowAppearanceOverride() {
+    #expect(AppTheme.system.appearanceOverride == .followSystem)
+    #expect(AppTheme.light.appearanceOverride == .light)
+    #expect(AppTheme.dark.appearanceOverride == .dark)
+    #expect(AppTheme.iridescentPink.appearanceOverride == .light)
 }
 
 @Test("Every theme carries a translated label")
@@ -157,6 +249,14 @@ func localizesThemeLabels() {
     #expect(AppLocalization.text(AppTheme.system.label, language: .spanish) == "Automático")
     #expect(AppLocalization.text(AppTheme.light.label, language: .spanish) == "Claro")
     #expect(AppLocalization.text(AppTheme.dark.label, language: .spanish) == "Oscuro")
+    #expect(
+        AppLocalization.text(AppTheme.iridescentPink.label, language: .spanish)
+            == "Rosa iridiscente"
+    )
     #expect(AppLocalization.text(AppTheme.system.label, language: .norwegianBokmal) == "Automatisk")
+    #expect(
+        AppLocalization.text(AppTheme.iridescentPink.label, language: .norwegianBokmal)
+            == "Iriserende rosa"
+    )
     #expect(AppLocalization.text(AppTheme.dark.label, language: .english) == "Dark")
 }

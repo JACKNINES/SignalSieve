@@ -23,6 +23,8 @@ public enum HiddenElementContext: String, Sendable, Equatable {
     case scriptShaping = "Functional script shaping"
     case glyphVariation = "Functional glyph variation"
     case bidirectionalText = "Functional bidirectional text"
+    case orthographicShaping = "Functional orthographic shaping"
+    case layoutFormatting = "Functional script or notation layout"
 
     public var isFunctional: Bool { self != .noFunctionalContext }
 }
@@ -36,11 +38,15 @@ public enum HiddenElementKind: String, Sendable, CaseIterable {
     case unusualWhitespace = "Unusual whitespace"
     case privateUse = "Private-use character"
     case unassigned = "Unassigned code point"
+    case invisibleFiller = "Invisible script filler"
+    case reservedIgnorable = "Reserved default-ignorable code point"
+    case noncharacter = "Unicode noncharacter"
+    case layoutControl = "Invisible layout control"
 
     public var riskLevel: HiddenElementRiskLevel {
         switch self {
-        case .bidirectional, .tag, .control: .high
-        case .zeroWidth, .variationSelector, .privateUse: .medium
+        case .bidirectional, .tag, .control, .reservedIgnorable, .noncharacter: .high
+        case .zeroWidth, .variationSelector, .privateUse, .invisibleFiller, .layoutControl: .medium
         case .unusualWhitespace, .unassigned: .suspicious
         }
     }
@@ -147,6 +153,7 @@ public enum HiddenTextAnalyzer {
         case kannada
         case malayalam
         case sinhala
+        case tibetan
         case myanmar
         case khmer
         case mongolian
@@ -160,6 +167,10 @@ public enum HiddenTextAnalyzer {
         0x200C, // zero width non-joiner
         0x200D, // zero width joiner
         0x2060, // word joiner
+        0x2061, // function application
+        0x2062, // invisible times
+        0x2063, // invisible separator
+        0x2064, // invisible plus
         0xFEFF  // zero width no-break space / BOM
     ]
 
@@ -167,10 +178,22 @@ public enum HiddenTextAnalyzer {
         0x00A0: "NO-BREAK SPACE",
         0x00AD: "SOFT HYPHEN",
         0x034F: "COMBINING GRAPHEME JOINER",
+        0x0600: "ARABIC NUMBER SIGN",
+        0x0601: "ARABIC SIGN SANAH",
+        0x0602: "ARABIC FOOTNOTE MARKER",
+        0x0603: "ARABIC SIGN SAFHA",
+        0x0604: "ARABIC SIGN SAMVAT",
+        0x0605: "ARABIC NUMBER MARK ABOVE",
         0x061C: "ARABIC LETTER MARK",
+        0x06DD: "ARABIC END OF AYAH",
+        0x070F: "SYRIAC ABBREVIATION MARK",
+        0x08E2: "ARABIC DISPUTED END OF AYAH",
+        0x115F: "HANGUL CHOSEONG FILLER",
+        0x1160: "HANGUL JUNGSEONG FILLER",
         0x180B: "MONGOLIAN FREE VARIATION SELECTOR ONE",
         0x180C: "MONGOLIAN FREE VARIATION SELECTOR TWO",
         0x180D: "MONGOLIAN FREE VARIATION SELECTOR THREE",
+        0x180F: "MONGOLIAN FREE VARIATION SELECTOR FOUR",
         0x180E: "MONGOLIAN VOWEL SEPARATOR",
         0x200B: "ZERO WIDTH SPACE",
         0x200C: "ZERO WIDTH NON-JOINER",
@@ -184,10 +207,28 @@ public enum HiddenTextAnalyzer {
         0x202E: "RIGHT-TO-LEFT OVERRIDE",
         0x202F: "NARROW NO-BREAK SPACE",
         0x2060: "WORD JOINER",
+        0x2061: "FUNCTION APPLICATION",
+        0x2062: "INVISIBLE TIMES",
+        0x2063: "INVISIBLE SEPARATOR",
+        0x2064: "INVISIBLE PLUS",
         0x2066: "LEFT-TO-RIGHT ISOLATE",
         0x2067: "RIGHT-TO-LEFT ISOLATE",
         0x2068: "FIRST STRONG ISOLATE",
         0x2069: "POP DIRECTIONAL ISOLATE",
+        0x206A: "INHIBIT SYMMETRIC SWAPPING",
+        0x206B: "ACTIVATE SYMMETRIC SWAPPING",
+        0x206C: "INHIBIT ARABIC FORM SHAPING",
+        0x206D: "ACTIVATE ARABIC FORM SHAPING",
+        0x206E: "NATIONAL DIGIT SHAPES",
+        0x206F: "NOMINAL DIGIT SHAPES",
+        0x110BD: "KAITHI NUMBER SIGN",
+        0x110CD: "KAITHI NUMBER SIGN ABOVE",
+        0x3164: "HANGUL FILLER",
+        0xFFA0: "HALFWIDTH HANGUL FILLER",
+        0xFFF9: "INTERLINEAR ANNOTATION ANCHOR",
+        0xFFFA: "INTERLINEAR ANNOTATION SEPARATOR",
+        0xFFFB: "INTERLINEAR ANNOTATION TERMINATOR",
+        0xE0001: "LANGUAGE TAG",
         0xFEFF: "ZERO WIDTH NO-BREAK SPACE / BOM"
     ]
 
@@ -232,16 +273,38 @@ public enum HiddenTextAnalyzer {
             || value == 0x200E
             || value == 0x200F
             || (0x202A...0x202E).contains(value)
-            || (0x2066...0x2069).contains(value) {
+            || (0x2066...0x206F).contains(value) {
             return .bidirectional
         }
-        if (0x180B...0x180D).contains(value)
+        if (0x180B...0x180F).contains(value)
             || (0xFE00...0xFE0F).contains(value)
             || (0xE0100...0xE01EF).contains(value) {
             return .variationSelector
         }
-        if (0xE0000...0xE007F).contains(value) {
+        if value == 0xE0001 || (0xE0020...0xE007F).contains(value) {
             return .tag
+        }
+        if value == 0x115F || value == 0x1160
+            || value == 0x3164 || value == 0xFFA0
+            || value == 0x17B4 || value == 0x17B5 {
+            return .invisibleFiller
+        }
+        if isOrthographicFormatControl(value)
+            || (0x13430...0x1343F).contains(value)
+            || (0x1BCA0...0x1BCA3).contains(value)
+            || (0x1D173...0x1D17A).contains(value)
+            || (0xFFF9...0xFFFB).contains(value) {
+            return .layoutControl
+        }
+        if value == 0x2065
+            || (0xFFF0...0xFFF8).contains(value)
+            || value == 0xE0000
+            || (0xE0080...0xE00FF).contains(value)
+            || (0xE01F0...0xE0FFF).contains(value) {
+            return .reservedIgnorable
+        }
+        if isNoncharacter(value) {
+            return .noncharacter
         }
         if explicitZeroWidth.contains(value) {
             return .zeroWidth
@@ -324,13 +387,30 @@ public enum HiddenTextAnalyzer {
                isFunctionalDirectionalMark(in: scalars, at: index) {
                 return .bidirectionalText
             }
+            if isBalancedBidirectionalControl(in: scalars, at: index) {
+                return .bidirectionalText
+            }
+
+        case .invisibleFiller:
+            if isFunctionalScriptFiller(in: scalars, at: index) {
+                return .orthographicShaping
+            }
+
+        case .layoutControl:
+            if isFunctionalOrthographicControl(in: scalars, at: index) {
+                return .orthographicShaping
+            }
+            if isFunctionalLayoutControl(in: scalars, at: index) {
+                return .layoutFormatting
+            }
 
         case .tag:
             if isStandardEmojiTagSequence(in: scalars, containing: index) {
                 return .emojiComposition
             }
 
-        case .control, .unusualWhitespace, .privateUse, .unassigned:
+        case .control, .unusualWhitespace, .privateUse, .unassigned,
+             .reservedIgnorable, .noncharacter:
             break
         }
 
@@ -384,17 +464,14 @@ public enum HiddenTextAnalyzer {
             || (index + 1 < scalars.count && classify(scalars[index + 1]) == .variationSelector)
         guard !hasAdjacentSelector else { return false }
 
-        if (0x180B...0x180D).contains(value) {
+        if (0x180B...0x180F).contains(value) {
             return joiningScript(for: previous.value) == .mongolian
         }
         if (0xE0100...0xE01EF).contains(value) {
             return isIdeographicBase(previous.value)
         }
-        if (0xFE00...0xFE0F).contains(value) {
-            return previous.value > 0x7F
-                && !previous.properties.isWhitespace
-                && previous.properties.generalCategory != .control
-                && previous.properties.generalCategory != .format
+        if (0xFE00...0xFE0D).contains(value) {
+            return isIdeographicBase(previous.value)
         }
         return false
     }
@@ -418,8 +495,116 @@ public enum HiddenTextAnalyzer {
         return previousScript == nextScript
     }
 
-    private static func joiningScript(for value: UInt32) -> JoiningScript? {
+    private static func isFunctionalScriptFiller(
+        in scalars: [Unicode.Scalar],
+        at index: Int
+    ) -> Bool {
+        guard index > 0 else { return false }
+        let value = scalars[index].value
+        let previous = scalars[index - 1].value
         switch value {
+        case 0x17B4, 0x17B5:
+            return (0x1780...0x17A2).contains(previous)
+        case 0x115F, 0x1160, 0x3164, 0xFFA0:
+            return (0x1100...0x11FF).contains(previous)
+                || (0x3130...0x318F).contains(previous)
+                || (0xA960...0xA97F).contains(previous)
+                || (0xD7B0...0xD7FF).contains(previous)
+                || (0xFFA0...0xFFDC).contains(previous)
+        default:
+            return false
+        }
+    }
+
+    private static func isOrthographicFormatControl(_ value: UInt32) -> Bool {
+        (0x0600...0x0605).contains(value)
+            || value == 0x06DD
+            || value == 0x070F
+            || value == 0x08E2
+            || value == 0x110BD
+            || value == 0x110CD
+    }
+
+    private static func isFunctionalOrthographicControl(
+        in scalars: [Unicode.Scalar],
+        at index: Int
+    ) -> Bool {
+        let value = scalars[index].value
+        guard isOrthographicFormatControl(value) else { return false }
+        let neighbors = [index - 1, index + 1]
+            .filter(scalars.indices.contains)
+            .map { scalars[$0].value }
+        switch value {
+        case 0x070F:
+            return neighbors.contains { (0x0700...0x074F).contains($0) }
+        case 0x110BD, 0x110CD:
+            return neighbors.contains { (0x11080...0x110CF).contains($0) }
+        default:
+            return neighbors.contains { (0x0600...0x08FF).contains($0) }
+        }
+    }
+
+    private static func isFunctionalLayoutControl(
+        in scalars: [Unicode.Scalar],
+        at index: Int
+    ) -> Bool {
+        let value = scalars[index].value
+        let neighbors = [index - 1, index + 1]
+            .filter(scalars.indices.contains)
+            .map { scalars[$0].value }
+        if (0x13430...0x1343F).contains(value) {
+            return neighbors.contains { (0x13000...0x143FF).contains($0) }
+        }
+        if (0x1BCA0...0x1BCA3).contains(value) {
+            return neighbors.contains { (0x1BC00...0x1BC9F).contains($0) }
+        }
+        if (0x1D173...0x1D17A).contains(value) {
+            return neighbors.contains { (0x1D100...0x1D1FF).contains($0) }
+        }
+        return false
+    }
+
+    private static func isBalancedBidirectionalControl(
+        in scalars: [Unicode.Scalar],
+        at index: Int
+    ) -> Bool {
+        let value = scalars[index].value
+        // Overrides are intentionally never considered safe: they are the
+        // controls used by Trojan Source-style visual reordering.
+        guard value != 0x202D, value != 0x202E else { return false }
+        let bounds = paragraphBounds(in: scalars, around: index)
+        let paragraph = Array(scalars[bounds])
+        let localIndex = index - bounds.lowerBound
+        if value == 0x202A || value == 0x202B {
+            return paragraph[(localIndex + 1)...].contains { $0.value == 0x202C }
+        }
+        if value == 0x202C {
+            return paragraph[..<localIndex].contains { $0.value == 0x202A || $0.value == 0x202B }
+        }
+        if (0x2066...0x2068).contains(value) {
+            return paragraph[(localIndex + 1)...].contains { $0.value == 0x2069 }
+        }
+        if value == 0x2069 {
+            return paragraph[..<localIndex].contains { (0x2066...0x2068).contains($0.value) }
+        }
+        return false
+    }
+
+    private static func isNoncharacter(_ value: UInt32) -> Bool {
+        (0xFDD0...0xFDEF).contains(value)
+            || (value <= 0x10FFFF && (value & 0xFFFF == 0xFFFE || value & 0xFFFF == 0xFFFF))
+    }
+
+    private static func joiningScript(for value: UInt32) -> JoiningScript? {
+        guard let scalar = Unicode.Scalar(value) else { return nil }
+        let category = scalar.properties.generalCategory
+        guard scalar.properties.isAlphabetic
+            || category == .nonspacingMark
+            || category == .spacingMark
+            || category == .enclosingMark else {
+            return nil
+        }
+        return switch value {
         case 0x0600...0x06FF, 0x0750...0x077F, 0x0870...0x089F,
              0x08A0...0x08FF, 0xFB50...0xFDFF, 0xFE70...0xFEFF:
             .arabic
@@ -436,6 +621,7 @@ public enum HiddenTextAnalyzer {
         case 0x0C80...0x0CFF: .kannada
         case 0x0D00...0x0D7F: .malayalam
         case 0x0D80...0x0DFF: .sinhala
+        case 0x0F00...0x0FFF: .tibetan
         case 0x1000...0x109F, 0xAA60...0xAA7F, 0xA9E0...0xA9FF: .myanmar
         case 0x1780...0x17FF: .khmer
         case 0x1800...0x18AF: .mongolian

@@ -378,9 +378,11 @@ public enum SignatureHuntEngine {
             return ![.privateUse, .unassigned].contains(kind)
         }
         return switch kind {
-        case .bidirectional, .tag, .control, .unusualWhitespace: true
+        case .bidirectional, .tag, .control, .unusualWhitespace,
+             .reservedIgnorable, .noncharacter: true
         case .zeroWidth: codePoint != "U+200C" && codePoint != "U+200D"
-        case .variationSelector, .privateUse, .unassigned: false
+        case .variationSelector, .privateUse, .unassigned,
+             .invisibleFiller, .layoutControl: false
         }
     }
 

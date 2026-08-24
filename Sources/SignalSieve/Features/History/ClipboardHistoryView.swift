@@ -101,13 +101,29 @@ struct ClipboardHistoryView: View {
                 if let binaryKind = entry.binaryKind {
                     badge(AppLocalization.text(binaryKind.rawValue, language: language), color: .yellow)
                 }
+                if entry.scamSignalCount > 0 {
+                    badge(
+                        formatted("Possible scam · %d signal(s)", entry.scamSignalCount),
+                        color: entry.scamThreatLevel == .high ? .red : .orange
+                    )
+                }
                 if !entry.hasKnownRisk {
                     badge(localized("No known risk"), color: .green)
                 }
-                if entry.wasAutomaticallyCleaned {
+                if let audit = entry.automaticCleaningAudit,
+                   audit.originalAlertCount > 0 {
+                    automaticCleaningBadge(audit)
+                }
+                if entry.wasAutomaticallyCleaned,
+                   entry.automaticCleaningAudit?.didWriteCleanedText != true {
                     badge(localized("Link auto-cleaned"), color: .blue)
                 }
                 Spacer()
+            }
+
+            if let audit = entry.automaticCleaningAudit,
+               audit.originalAlertCount > 0 {
+                automaticCleaningSummary(audit)
             }
 
             HStack {
@@ -165,6 +181,51 @@ struct ClipboardHistoryView: View {
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(color.opacity(0.10), in: Capsule())
+    }
+
+    @ViewBuilder
+    private func automaticCleaningBadge(
+        _ audit: ClipboardAutomaticCleaningAudit
+    ) -> some View {
+        let mode = localized(audit.mode == .safe ? "Safe Clean" : "Strict Clean")
+        switch audit.outcome {
+        case .cleanedAllDetectedAlerts:
+            badge(formatted("%@ · alerts cleaned successfully", mode), color: .green)
+        case .cleanedSomeDetectedAlerts:
+            badge(formatted("%@ · some alerts cleaned", mode), color: .orange)
+        case .alertsRemain:
+            badge(formatted("%@ · alerts remain", mode), color: .red)
+        case .skipped:
+            badge(formatted("%@ · cleaning skipped", mode), color: .red)
+        case .noDetectedAlerts:
+            EmptyView()
+        }
+    }
+
+    private func automaticCleaningSummary(
+        _ audit: ClipboardAutomaticCleaningAudit
+    ) -> some View {
+        let mode = localized(audit.mode == .safe ? "Safe Clean" : "Strict Clean")
+        let successful = audit.outcome == .cleanedAllDetectedAlerts
+        let text = successful
+            ? formatted(
+                "%@ reanalysis: %d original alert(s), none remaining after automatic cleaning.",
+                mode,
+                audit.originalAlertCount
+            )
+            : formatted(
+                "%@ reanalysis: %d original alert(s), %d remaining after automatic cleaning.",
+                mode,
+                audit.originalAlertCount,
+                audit.remainingAlertCount
+            )
+        let color: Color = successful ? .green : (audit.redRiskRemains ? .red : .orange)
+        return Label(
+            text,
+            systemImage: successful ? "checkmark.shield.fill" : "exclamationmark.shield.fill"
+        )
+        .font(.caption)
+        .foregroundStyle(color)
     }
 
     private func dateText(_ date: Date) -> String {

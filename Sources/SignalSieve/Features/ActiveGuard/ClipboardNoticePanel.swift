@@ -10,6 +10,9 @@ enum ClipboardWarningKind: String, CaseIterable, Hashable {
     case fileMetadata
     case trackedLink
     case repeatedPattern
+    case opaqueIdentifier
+    case scamAttempt
+    case adaptiveAnomaly
 
     var label: String {
         switch self {
@@ -19,6 +22,9 @@ enum ClipboardWarningKind: String, CaseIterable, Hashable {
         case .fileMetadata: "File or image metadata"
         case .trackedLink: "Tracked links"
         case .repeatedPattern: "Repeated patterns"
+        case .opaqueIdentifier: "Opaque identifiers"
+        case .scamAttempt: "Possible scam attempts"
+        case .adaptiveAnomaly: "Usual copy pattern alerts"
         }
     }
 }
@@ -37,13 +43,19 @@ struct ClipboardNotice: Identifiable {
     let trackedLinkCount: Int
     let removedParameterCount: Int
     let patternReport: PatternReport
+    let identifierAnalysis: OpaqueIdentifierAnalysis
+    let scamAnalysis: ScamAttemptAnalysis
+    let adaptiveAnalysis: AdaptiveCopyAnalysis
     let clipboardContentKinds: [ClipboardContentKind]
     let pasteboardChangeCount: Int
+    let automaticCleaningAudit: ClipboardAutomaticCleaningAudit?
 
     var priority: ClipboardAlertPriority {
         ClipboardProtectionAnalyzer.alertPriority(
             hiddenUnicodeRisk: hiddenUnicodeRiskLevel,
-            codeRisk: codeRiskLevel
+            codeRisk: codeRiskLevel,
+            scamThreat: scamAnalysis.isPotentialScam ? scamAnalysis.threatLevel : nil,
+            hasElevatedSignal: trackedLinkCount > 0 || adaptiveAnalysis.isAnomalous
         )
     }
 
@@ -59,6 +71,9 @@ struct ClipboardNotice: Identifiable {
         }
         if trackedLinkCount > 0 { kinds.insert(.trackedLink) }
         if patternReport.hasSuspiciousRepetition { kinds.insert(.repeatedPattern) }
+        if identifierAnalysis.containsIdentifiers { kinds.insert(.opaqueIdentifier) }
+        if scamAnalysis.isPotentialScam { kinds.insert(.scamAttempt) }
+        if adaptiveAnalysis.isAnomalous { kinds.insert(.adaptiveAnomaly) }
         return kinds
     }
 }
@@ -73,10 +88,14 @@ final class ClipboardNoticePanelController {
         let onEnableAutoClean: () -> Void
         let onShowPatterns: () -> Void
         let onOpenFileInspector: () -> Void
-        let onSetSuppressed: (ClipboardWarningKind, Bool) -> Void
+        let alertVisibility: ClipboardAlertVisibility
+        let onSetAlertVisibility: (ClipboardAlertVisibility) -> Void
+        let clipboardProtocol: ClipboardAutomationProtocol
+        let onSetClipboardProtocol: (ClipboardAutomationProtocol) -> Void
     }
 
     private var panel: NSPanel?
+    private var hostingController: NSHostingController<ClipboardNoticeView>?
     private var isShowingHighPriorityNotice = false
     private var queuedHighPriorityPresentations: [Presentation] = []
 
@@ -88,7 +107,10 @@ final class ClipboardNoticePanelController {
         onEnableAutoClean: @escaping () -> Void,
         onShowPatterns: @escaping () -> Void,
         onOpenFileInspector: @escaping () -> Void,
-        onSetSuppressed: @escaping (ClipboardWarningKind, Bool) -> Void
+        alertVisibility: ClipboardAlertVisibility,
+        onSetAlertVisibility: @escaping (ClipboardAlertVisibility) -> Void,
+        clipboardProtocol: ClipboardAutomationProtocol,
+        onSetClipboardProtocol: @escaping (ClipboardAutomationProtocol) -> Void
     ) {
         let presentation = Presentation(
             notice: notice,
@@ -98,7 +120,10 @@ final class ClipboardNoticePanelController {
             onEnableAutoClean: onEnableAutoClean,
             onShowPatterns: onShowPatterns,
             onOpenFileInspector: onOpenFileInspector,
-            onSetSuppressed: onSetSuppressed
+            alertVisibility: alertVisibility,
+            onSetAlertVisibility: onSetAlertVisibility,
+            clipboardProtocol: clipboardProtocol,
+            onSetClipboardProtocol: onSetClipboardProtocol
         )
 
         if isShowingHighPriorityNotice, panel?.isVisible == true {
@@ -140,19 +165,25 @@ final class ClipboardNoticePanelController {
             onEnableAutoClean: presentation.onEnableAutoClean,
             onShowPatterns: presentation.onShowPatterns,
             onOpenFileInspector: presentation.onOpenFileInspector,
-            onSetSuppressed: presentation.onSetSuppressed,
+            alertVisibility: presentation.alertVisibility,
+            onSetAlertVisibility: presentation.onSetAlertVisibility,
+            clipboardProtocol: presentation.clipboardProtocol,
+            onSetClipboardProtocol: presentation.onSetClipboardProtocol,
             onDismiss: { [weak self] in self?.dismissCurrent() }
         )
 
         let panel = panel ?? makePanel()
         panel.title = AppLocalization.text("SignalSieve Active Guard", language: language)
-        let hostingView = NSHostingView(rootView: view)
-        panel.contentView = hostingView
+        let hostingController = NSHostingController(rootView: view)
+        panel.contentViewController = hostingController
+        self.hostingController = hostingController
+        let hostingView = hostingController.view
         let panelWidth: CGFloat = 700
+        let maximumHeight = max(360, (panel.screen ?? NSScreen.main)?.visibleFrame.height ?? 720)
         panel.setContentSize(
             NSSize(
                 width: panelWidth,
-                height: max(245, hostingView.fittingSize.height)
+                height: min(maximumHeight - 80, max(245, hostingView.fittingSize.height))
             )
         )
         self.panel = panel
@@ -166,6 +197,7 @@ final class ClipboardNoticePanelController {
             panel.orderFrontRegardless()
         } else {
             NSApp.requestUserAttention(.informationalRequest)
+            panel.makeKeyAndOrderFront(nil)
             panel.orderFrontRegardless()
         }
     }
@@ -181,6 +213,7 @@ final class ClipboardNoticePanelController {
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.hidesOnDeactivate = false
+        panel.becomesKeyOnlyIfNeeded = true
         panel.isReleasedWhenClosed = false
         panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -191,11 +224,15 @@ final class ClipboardNoticePanelController {
     private func configure(_ panel: NSPanel, for priority: ClipboardAlertPriority) {
         switch priority {
         case .high:
+            panel.becomesKeyOnlyIfNeeded = false
             panel.isFloatingPanel = true
             panel.level = .modalPanel
-        case .standard:
-            panel.isFloatingPanel = false
-            panel.level = .normal
+        case .elevated, .standard:
+            // The app commonly runs behind the source application. A normal
+            // window level could make a delivered warning completely hidden.
+            panel.becomesKeyOnlyIfNeeded = true
+            panel.isFloatingPanel = true
+            panel.level = .floating
         }
     }
 
@@ -222,19 +259,23 @@ private struct ClipboardNoticeView: View {
     let onEnableAutoClean: () -> Void
     let onShowPatterns: () -> Void
     let onOpenFileInspector: () -> Void
-    let onSetSuppressed: (ClipboardWarningKind, Bool) -> Void
+    let alertVisibility: ClipboardAlertVisibility
+    let onSetAlertVisibility: (ClipboardAlertVisibility) -> Void
+    let clipboardProtocol: ClipboardAutomationProtocol
+    let onSetClipboardProtocol: (ClipboardAutomationProtocol) -> Void
     let onDismiss: () -> Void
-    @State private var suppressedKinds: Set<ClipboardWarningKind> = []
+    @State private var selectedProtocol: ClipboardAutomationProtocol = .reviewAll
+    @State private var selectedAlertVisibility: ClipboardAlertVisibility = .showAll
 
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
             HStack(alignment: .top, spacing: 11) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill((notice.isHighPriority ? Color.red : Color.orange).opacity(0.16))
+                        .fill(priorityColor.opacity(0.16))
                     Image(systemName: "shield.lefthalf.filled.badge.checkmark")
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(notice.isHighPriority ? .red : .orange)
+                        .foregroundStyle(priorityColor)
                 }
                 .frame(width: 32, height: 32)
                 .accessibilityHidden(true)
@@ -266,7 +307,12 @@ private struct ClipboardNoticeView: View {
                 .accessibilityLabel(localized("Dismiss"))
             }
 
-            VStack(alignment: .leading, spacing: 10) {
+            if notice.isHighPriority, let audit = notice.automaticCleaningAudit {
+                automaticRedRiskBanner(audit)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
                 if notice.codeRiskCount > 0 {
                     warningCard(
                         kind: .unsafeCode,
@@ -315,15 +361,17 @@ private struct ClipboardNoticeView: View {
                     )
                 }
                 if notice.trackedLinkCount > 0 {
+                    let hasRemovedParameters = notice.removedParameterCount > 0
                     warningCard(
                         kind: .trackedLink,
                         icon: "link.badge.plus",
                         color: .orange,
-                        title: formatted(
-                            "%d known tracking parameter(s) detected",
-                            notice.removedParameterCount
-                        ),
-                        detail: localized("These are known campaign or share identifiers. Cleaning removes known tracking parameters while preserving functional link parameters.")
+                        title: hasRemovedParameters
+                            ? formatted("%d known tracking parameter(s) detected", notice.removedParameterCount)
+                            : localized("Opaque redirect or short link detected"),
+                        detail: hasRemovedParameters
+                            ? localized("These are known campaign or share identifiers. Cleaning removes known tracking parameters while preserving functional link parameters.")
+                            : localized("Signal Sieve did not contact the redirect server. Its final destination cannot be resolved offline, so the link was reported but not rewritten.")
                     )
                 }
                 if notice.patternReport.hasSuspiciousRepetition {
@@ -335,11 +383,102 @@ private struct ClipboardNoticeView: View {
                         detail: localized("Similar wording or structure appeared repeatedly. This is a correlation signal, not proof of a watermark, authorship, or source.")
                     )
                 }
+                if notice.identifierAnalysis.containsIdentifiers {
+                    warningCard(
+                        kind: .opaqueIdentifier,
+                        icon: "number.square.fill",
+                        color: .yellow,
+                        title: formatted(
+                            "%d opaque identifier(s) detected",
+                            notice.identifierAnalysis.findings.count
+                        ),
+                        detail: localized("UUIDs can be legitimate, but they can also correlate a copied message, document, device, or account across systems. Review before sharing.")
+                    )
+                }
+                if notice.scamAnalysis.isPotentialScam {
+                    warningCard(
+                        kind: .scamAttempt,
+                        icon: "exclamationmark.bubble.fill",
+                        color: notice.scamAnalysis.threatLevel == .high ? .red : .orange,
+                        title: formatted(
+                            "Possible scam attempt · score %d/100",
+                            notice.scamAnalysis.score
+                        ),
+                        detail: formatted(
+                            "%d explainable signal(s), including brand look-alikes, domain mismatch, urgency, or a dangerous URL structure. SignalSieve did not open the link.",
+                            notice.scamAnalysis.signals.count
+                        )
+                    )
+                }
+                if notice.adaptiveAnalysis.isAnomalous {
+                    warningCard(
+                        kind: .adaptiveAnomaly,
+                        icon: "waveform.path.ecg.rectangle.fill",
+                        color: .orange,
+                        title: localized("This copy looks different from your usual copies"),
+                        detail: formatted(
+                            "%d writing measurement(s) were unusual. This local learner never stores clipboard text.",
+                            notice.adaptiveAnalysis.deviations.count
+                        )
+                    )
+                }
+                }
             }
+            .frame(maxHeight: 420)
 
-            Text(localized("These checkboxes take effect immediately. Re-enable a warning later from the Active Guard menu."))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 7) {
+                Text(localized("Copying Settings"))
+                    .font(.caption.weight(.semibold))
+                Toggle(
+                    localized("Stop showing green and yellow alerts"),
+                    isOn: Binding(
+                        get: { selectedAlertVisibility == .hideGreenAndYellow },
+                        set: { newValue in
+                            selectedAlertVisibility = newValue ? .hideGreenAndYellow : .showAll
+                            onSetAlertVisibility(selectedAlertVisibility)
+                        }
+                    )
+                )
+                .toggleStyle(.checkbox)
+                .font(.caption)
+                .help(localized("Orange and red alerts remain visible. Red alerts cannot be disabled."))
+                Toggle(
+                    localized("Stop showing green through orange alerts"),
+                    isOn: Binding(
+                        get: { selectedAlertVisibility == .redOnly },
+                        set: { newValue in
+                            selectedAlertVisibility = newValue ? .redOnly : .showAll
+                            onSetAlertVisibility(selectedAlertVisibility)
+                        }
+                    )
+                )
+                .toggleStyle(.checkbox)
+                .font(.caption)
+                .help(localized("Only red alerts remain visible. Red alerts cannot be disabled."))
+                Text(localized("Alert visibility choices are mutually exclusive."))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                protocolToggle(
+                    .safeClean,
+                    label: "Automatically use Safe Clean for copied text",
+                    help: "Eligible future text copies are Safe Cleaned. Alert visibility is controlled separately."
+                )
+                protocolToggle(
+                    .strictClean,
+                    label: "Automatically use Strict Clean for copied text",
+                    help: "Eligible future text copies are Strict Cleaned. Emoji and some writing systems may change. Alert visibility is controlled separately."
+                )
+                Text(localized("Safe Clean and Strict Clean are mutually exclusive. Alert visibility is a separate setting."))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(localized("Automatic text cleaning skips source code, files, images, and privacy-sensitive clipboard types."))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(10)
+            .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
@@ -362,9 +501,14 @@ private struct ClipboardNoticeView: View {
                                 : "Open the read-only inspector to choose and analyze the copied file."))
                     }
                     if notice.trackedLinkCount > 0 {
-                        Button(localized("Clean Link Once"), action: onCleanLinks)
+                        Button(
+                            localized(notice.removedParameterCount > 0 ? "Clean Link Once" : "Review Link Report"),
+                            action: notice.removedParameterCount > 0 ? onCleanLinks : onReview
+                        )
                             .sieveSheetButton(.primary)
-                            .help(localized("Cleans only the current clipboard copy after confirming it has not changed."))
+                            .help(localized(notice.removedParameterCount > 0
+                                ? "Cleans only the current clipboard copy after confirming it has not changed."
+                                : "Opens the local report without contacting or resolving the link."))
                     }
                     if notice.patternReport.hasSuspiciousRepetition {
                         Button(localized("Open Pattern Report"), action: onShowPatterns)
@@ -375,7 +519,7 @@ private struct ClipboardNoticeView: View {
                 }
 
                 HStack(spacing: 10) {
-                    if notice.trackedLinkCount > 0 {
+                    if notice.removedParameterCount > 0 {
                         Text(localized("For future copied links:"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -397,8 +541,12 @@ private struct ClipboardNoticeView: View {
         .overlay(alignment: .top) {
             // Severity reads before any word does.
             Rectangle()
-                .fill(notice.isHighPriority ? Color.red : Color.orange)
+                .fill(priorityColor)
                 .frame(height: 3)
+        }
+        .onAppear {
+            selectedProtocol = clipboardProtocol
+            selectedAlertVisibility = alertVisibility
         }
     }
 
@@ -408,6 +556,15 @@ private struct ClipboardNoticeView: View {
         }
         if notice.hiddenUnicodeCount > 0 {
             return localized("Hidden Unicode detected in copied text")
+        }
+        if notice.scamAnalysis.isPotentialScam {
+            return localized("Possible scam attempt detected")
+        }
+        if notice.identifierAnalysis.containsIdentifiers {
+            return localized("Opaque identifier detected in copied text")
+        }
+        if notice.adaptiveAnalysis.isAnomalous {
+            return localized("This copy looks different from your usual copies")
         }
         if notice.codeRiskCount > 0 {
             return notice.hasSpecificCodeLanguage
@@ -444,15 +601,45 @@ private struct ClipboardNoticeView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Toggle(suppressionLabel(for: kind), isOn: suppressionBinding(for: kind))
-                .toggleStyle(.checkbox)
-                .font(.caption)
         }
         .padding(12)
         .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
         .overlay {
             RoundedRectangle(cornerRadius: 9)
                 .stroke(color.opacity(0.45), lineWidth: 1)
+        }
+    }
+
+    private func automaticRedRiskBanner(
+        _ audit: ClipboardAutomaticCleaningAudit
+    ) -> some View {
+        let removed = audit.redRiskWasRemoved
+        let mode = localized(audit.mode == .safe ? "Safe Clean" : "Strict Clean")
+        let title = removed
+            ? formatted("%@ removed the detected red text risk from the current clipboard", mode)
+            : formatted("%@ did not remove every red finding", mode)
+        let detail = removed
+            ? localized("The clipboard text was reanalyzed after cleaning and no red text finding remained. Still use caution: the original source may have malicious intent.")
+            : localized("A red finding remains or automatic cleaning was skipped. Do not trust the content solely because cleaning is enabled; its source may have malicious intent.")
+        let color: Color = removed ? .green : .red
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Label(
+                title,
+                systemImage: removed ? "checkmark.shield.fill" : "exclamationmark.shield.fill"
+            )
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(color)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .background(color.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9)
+                .stroke(color.opacity(0.35), lineWidth: 1)
         }
     }
 
@@ -465,35 +652,29 @@ private struct ClipboardNoticeView: View {
         }
     }
 
-    private func suppressionLabel(for kind: ClipboardWarningKind) -> String {
-        switch kind {
-        case .hiddenUnicode:
-            localized("Don't show hidden Unicode warnings again")
-        case .unsafeCode:
-            localized("Don't show source-code warnings again")
-        case .binaryContent:
-            localized("Don't show binary-data warnings again")
-        case .fileMetadata:
-            localized("Don't show file-or-image metadata warnings again")
-        case .trackedLink:
-            localized("Don't show tracked-link warnings again")
-        case .repeatedPattern:
-            localized("Don't show repeated-pattern warnings again")
+    private var priorityColor: Color {
+        switch notice.priority {
+        case .high: .red
+        case .elevated: .orange
+        case .standard: .yellow
         }
     }
 
-    private func suppressionBinding(for kind: ClipboardWarningKind) -> Binding<Bool> {
-        Binding(
-            get: { suppressedKinds.contains(kind) },
-            set: { isSuppressed in
-                if isSuppressed {
-                    suppressedKinds.insert(kind)
-                } else {
-                    suppressedKinds.remove(kind)
-                }
-                onSetSuppressed(kind, isSuppressed)
+    private func protocolToggle(
+        _ value: ClipboardAutomationProtocol,
+        label: String,
+        help: String
+    ) -> some View {
+        Toggle(localized(label), isOn: Binding(
+            get: { selectedProtocol == value },
+            set: { isSelected in
+                selectedProtocol = isSelected ? value : .reviewAll
+                onSetClipboardProtocol(selectedProtocol)
             }
-        )
+        ))
+        .toggleStyle(.checkbox)
+        .font(.caption)
+        .help(localized(help))
     }
 
     private func localized(_ english: String) -> String {

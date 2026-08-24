@@ -3,40 +3,62 @@ import Foundation
 
 public enum ClipboardAlertPriority: Sendable, Equatable {
     case standard
+    case elevated
     case high
 }
 
 public struct ClipboardProtectionAnalysis: Sendable, Equatable {
     public let inspection: TextInspection
+    public let covertChannelReport: CovertTextChannelReport
     public let codeAnalysis: CodeGuardAnalysis
     public let binaryAnalysis: BinaryContentAnalysis
     public let linkCleaning: URLCleaningResult
+    public let identifierAnalysis: OpaqueIdentifierAnalysis
+    public let scamAnalysis: ScamAttemptAnalysis
     public let recentPatternReport: PatternReport
     public let updatedPatternTexts: [String]
     public let addedPatternSample: Bool
 
     public init(
         inspection: TextInspection,
+        covertChannelReport: CovertTextChannelReport,
         codeAnalysis: CodeGuardAnalysis,
         binaryAnalysis: BinaryContentAnalysis,
         linkCleaning: URLCleaningResult,
+        identifierAnalysis: OpaqueIdentifierAnalysis,
+        scamAnalysis: ScamAttemptAnalysis,
         recentPatternReport: PatternReport,
         updatedPatternTexts: [String],
         addedPatternSample: Bool
     ) {
         self.inspection = inspection
+        self.covertChannelReport = covertChannelReport
         self.codeAnalysis = codeAnalysis
         self.binaryAnalysis = binaryAnalysis
         self.linkCleaning = linkCleaning
+        self.identifierAnalysis = identifierAnalysis
+        self.scamAnalysis = scamAnalysis
         self.recentPatternReport = recentPatternReport
         self.updatedPatternTexts = updatedPatternTexts
         self.addedPatternSample = addedPatternSample
     }
 
-    public var containsHiddenUnicode: Bool { !inspection.isClean }
+    public var containsHiddenUnicode: Bool {
+        !inspection.isClean || covertChannelReport.hasSuspiciousChannel
+    }
+    public var hiddenTextFindingCount: Int {
+        inspection.actionableFindings.count + covertChannelReport.findings.count
+    }
+    public var hiddenTextRiskLevel: HiddenElementRiskLevel? {
+        [inspection.highestRiskLevel, covertChannelReport.highestRiskLevel]
+            .compactMap { $0 }
+            .max { $0.rawValue < $1.rawValue }
+    }
     public var containsCodeRisk: Bool { codeAnalysis.hasRisks }
     public var containsBinaryContent: Bool { binaryAnalysis.isDetected }
-    public var containsTrackedLinks: Bool { linkCleaning.linksChanged > 0 }
+    public var containsTrackedLinks: Bool { linkCleaning.hasTrackingRisk }
+    public var containsOpaqueIdentifiers: Bool { identifierAnalysis.containsIdentifiers }
+    public var containsPotentialScam: Bool { scamAnalysis.isPotentialScam }
     public var containsRecentPattern: Bool {
         addedPatternSample
             && recentPatternReport.sampleCount == 3
@@ -51,9 +73,20 @@ public enum ClipboardProtectionAnalyzer {
 
     public static func alertPriority(
         hiddenUnicodeRisk: HiddenElementRiskLevel?,
-        codeRisk: HiddenElementRiskLevel?
+        codeRisk: HiddenElementRiskLevel?,
+        scamThreat: ScamThreatLevel? = nil,
+        hasElevatedSignal: Bool = false
     ) -> ClipboardAlertPriority {
-        hiddenUnicodeRisk == .high || codeRisk == .high ? .high : .standard
+        if hiddenUnicodeRisk == .high || codeRisk == .high || scamThreat == .high {
+            return .high
+        }
+        if hiddenUnicodeRisk == .medium
+            || codeRisk == .medium
+            || scamThreat == .suspicious
+            || hasElevatedSignal {
+            return .elevated
+        }
+        return .standard
     }
 
     /// Performs the deterministic part of active clipboard protection. The
@@ -69,12 +102,15 @@ public enum ClipboardProtectionAnalyzer {
 
         return ClipboardProtectionAnalysis(
             inspection: HiddenTextAnalyzer.inspect(text),
+            covertChannelReport: CovertTextChannelAnalyzer.analyze(text),
             codeAnalysis: CodeGuardAnalyzer.analyze(text),
             binaryAnalysis: BinaryContentDetector.analyze(text),
             linkCleaning: URLTrackerCleaner.cleanLinks(
                 in: safelyCleanedText,
                 customRules: customRules
             ),
+            identifierAnalysis: OpaqueIdentifierAnalyzer.analyze(text),
+            scamAnalysis: ScamAttemptDetector.analyze(text),
             recentPatternReport: PatternAnalyzer.analyze(recentWindow),
             updatedPatternTexts: sampleUpdate.texts,
             addedPatternSample: sampleUpdate.added

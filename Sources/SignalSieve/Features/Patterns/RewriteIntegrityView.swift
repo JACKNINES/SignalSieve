@@ -40,7 +40,12 @@ struct RewriteIntegrityView: View {
                 .sieveSheetButton(.primary)
             }
         )
-        .frame(minWidth: 700, minHeight: 610)
+        .frame(
+            minWidth: 700,
+            idealWidth: 880,
+            minHeight: 610,
+            idealHeight: 720
+        )
         .task {
             refreshInstalledModels()
         }
@@ -58,14 +63,16 @@ struct RewriteIntegrityView: View {
                 findings
                 limitationCard
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// Optional bridge to an already-installed Ollama model. Everything stays
     /// on 127.0.0.1, and a missing model is never downloaded automatically.
     private var localRewriteCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 Label(localized("Optional Local Rewrite"), systemImage: "arrow.triangle.2.circlepath")
                     .font(.headline)
                 Text(localized("Best effort · never a watermark guarantee"))
@@ -74,7 +81,6 @@ struct RewriteIntegrityView: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
                     .background(.orange.opacity(0.14), in: Capsule())
-                Spacer()
             }
 
             Text(localized("Uses an already-installed Ollama model on 127.0.0.1. Missing models are never downloaded automatically by Signal Sieve."))
@@ -90,53 +96,7 @@ struct RewriteIntegrityView: View {
             .foregroundStyle(.orange)
             .fixedSize(horizontal: false, vertical: true)
 
-            HStack(alignment: .bottom, spacing: 9) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(localized(installedModels.isEmpty ? "Installed model name" : "Installed model"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if installedModels.isEmpty {
-                        TextField("qwen3.5:4b", text: $modelName)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 200)
-                    } else {
-                        Picker("", selection: $modelName) {
-                            ForEach(installedModels, id: \.self) { model in
-                                Text(model).tag(model)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 200)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(localized("Rewrite style"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Picker("", selection: $rewriteStyle) {
-                        ForEach(LocalRewriteStyle.allCases) { style in
-                            Text(AppLocalization.text(style.rawValue, language: language)).tag(style)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 210)
-                }
-
-                Spacer(minLength: 8)
-
-                Button(localized("Refresh Installed Models"), systemImage: "arrow.clockwise") {
-                    refreshInstalledModels()
-                }
-                .sieveSheetButton()
-                .disabled(isLoadingModels)
-
-                Button(localized("Rewrite Locally"), systemImage: "wand.and.rays") {
-                    runLocalRewrite()
-                }
-                .sieveSheetButton(.accented)
-                .disabled(isRewriting || original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
+            rewriteControls
 
             if isRewriting {
                 HStack(spacing: 8) {
@@ -177,6 +137,100 @@ struct RewriteIntegrityView: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(.blue.opacity(0.28), lineWidth: 1)
         }
+    }
+
+    /// Keeps the model selectors and actions visible at every supported sheet
+    /// width. The previous single row was wider than the 700-point sheet and
+    /// forced the entire scroll content outside its viewport.
+    private var rewriteControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .bottom, spacing: 9) {
+                modelControl(width: 200)
+                styleControl(width: 210)
+                Spacer(minLength: 8)
+                rewriteActions
+            }
+            .fixedSize(horizontal: true, vertical: false)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .bottom, spacing: 10) {
+                    modelControl(width: nil)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    styleControl(width: nil)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                rewriteActions
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+    }
+
+    private func modelControl(width: CGFloat?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(localized(installedModels.isEmpty ? "Installed model name" : "Installed model"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Group {
+                if installedModels.isEmpty {
+                    TextField("qwen3.5:4b", text: $modelName)
+                        .textFieldStyle(.roundedBorder)
+                } else {
+                    Picker("", selection: $modelName) {
+                        ForEach(installedModels, id: \.self) { model in
+                            Text(model).tag(model)
+                        }
+                    }
+                    .labelsHidden()
+                }
+            }
+            .frame(width: width)
+            .frame(maxWidth: width == nil ? .infinity : nil)
+        }
+    }
+
+    private func styleControl(width: CGFloat?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(localized("Rewrite style"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Picker("", selection: $rewriteStyle) {
+                ForEach(LocalRewriteStyle.allCases) { style in
+                    Text(AppLocalization.text(style.rawValue, language: language)).tag(style)
+                }
+            }
+            .labelsHidden()
+            .frame(width: width)
+            .frame(maxWidth: width == nil ? .infinity : nil)
+        }
+    }
+
+    private var rewriteActions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 9) {
+                refreshModelsButton
+                rewriteButton
+            }
+            VStack(alignment: .trailing, spacing: 8) {
+                refreshModelsButton
+                rewriteButton
+            }
+        }
+    }
+
+    private var refreshModelsButton: some View {
+        Button(localized("Refresh Installed Models"), systemImage: "arrow.clockwise") {
+            refreshInstalledModels()
+        }
+        .sieveSheetButton()
+        .disabled(isLoadingModels)
+    }
+
+    private var rewriteButton: some View {
+        Button(localized("Rewrite Locally"), systemImage: "wand.and.rays") {
+            runLocalRewrite()
+        }
+        .sieveSheetButton(.accented)
+        .disabled(isRewriting || original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
     private var assessmentCard: some View {

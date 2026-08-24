@@ -95,3 +95,23 @@ func contextualTagCleaning() {
     #expect(cleanedPayload.text == "\u{1F3F4}")
     #expect(cleanedPayload.removedCount == 6)
 }
+
+@Test("Safe cleaning preserves contextual fillers while removing floating carriers")
+func cleansExtendedUnicodeContextually() {
+    let functional = "\u{1100}\u{3164} · \u{1780}\u{17B4} · \u{13000}\u{13430}\u{13001}"
+    #expect(TextCleaner.clean(functional, mode: .safe).text == functional)
+    guard let noncharacter = Unicode.Scalar(0xFDD0) else { return }
+    let floating = "A\u{3164}B\u{2065}C" + String(noncharacter) + "D"
+    #expect(TextCleaner.clean(floating, mode: .safe).text == "ABCD")
+}
+
+@Test("Safe cleaning closes carrier gaps without breaking contextual scripts")
+func cleansUnicodeCarrierGap() {
+    let suspicious = "A\u{2061}B\u{206A}C\u{FFF9}D\u{E0001}EЖ\u{FE00}"
+    let cleaned = TextCleaner.clean(suspicious, mode: .safe)
+    #expect(cleaned.text == "ABCDEЖ")
+    #expect(cleaned.removedCount == 5)
+
+    let functional = "\u{0600}\u{0661} · \u{1100}\u{115F} · \u{0F40}\u{200D}\u{0F42} · 邊\u{FE00}"
+    #expect(TextCleaner.clean(functional, mode: .safe).text == functional)
+}

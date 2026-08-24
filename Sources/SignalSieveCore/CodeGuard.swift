@@ -180,11 +180,12 @@ public enum CodeGuardAnalyzer {
                 switch hiddenKind {
                 case .bidirectional:
                     codeKind = .bidirectionalControl
-                case .zeroWidth, .variationSelector, .tag, .control:
+                case .zeroWidth, .variationSelector, .tag, .control,
+                     .invisibleFiller, .layoutControl:
                     codeKind = .invisibleCharacter
                 case .unusualWhitespace:
                     codeKind = .nonASCIIWhitespace
-                case .privateUse, .unassigned:
+                case .privateUse, .unassigned, .reservedIgnorable, .noncharacter:
                     codeKind = .unsupportedUnicode
                 }
                 appendFinding(for: item, kind: codeKind, to: &findings)
@@ -230,7 +231,8 @@ public enum CodeGuardAnalyzer {
         for scalar in text.unicodeScalars {
             if let hiddenKind = HiddenTextAnalyzer.classify(scalar) {
                 switch hiddenKind {
-                case .bidirectional, .zeroWidth, .variationSelector, .tag, .control:
+                case .bidirectional, .zeroWidth, .variationSelector, .tag, .control,
+                     .invisibleFiller, .reservedIgnorable, .noncharacter, .layoutControl:
                     removed += 1
                 case .unusualWhitespace:
                     output.append(" ")

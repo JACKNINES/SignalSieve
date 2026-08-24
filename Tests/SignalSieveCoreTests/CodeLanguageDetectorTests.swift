@@ -72,3 +72,17 @@ func rejectsProgrammingLanguageFalsePositive() {
     #expect(!detection.isLikelyCode)
     #expect(detection.primary == nil)
 }
+
+@Test("Does not confuse ordinary match-at prose with a Rust match expression")
+func rejectsRustMatchProseFalsePositive() {
+    let prose = CodeLanguageDetector.detect(
+        "Signal Sieve flagged a 39% match at https://example.com and requested manual review."
+    )
+    let rust = CodeLanguageDetector.detect(
+        "match result { Some(value) => value, None => 0 }"
+    )
+
+    #expect(!prose.isLikelyCode)
+    #expect(rust.isLikelyCode)
+    #expect(rust.primary == .rust)
+}

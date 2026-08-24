@@ -167,3 +167,65 @@ func recognizesGlyphAndTagSequences() {
     #expect(arbitraryTagPayload.actionableFindings.count == 6)
     #expect(arbitraryTagPayload.highestRiskLevel == .high)
 }
+
+@Test("Covers reserved ignorables, noncharacters, and invisible script fillers")
+func coversExtendedInvisibleUnicodeCarriers() {
+    guard let noncharacter = Unicode.Scalar(0xFDD0) else { return }
+    let suspicious = HiddenTextAnalyzer.inspect("A\u{2065}B" + String(noncharacter) + "C\u{3164}D\u{FFA0}E")
+    #expect(suspicious.findings.map(\.kind) == [.reservedIgnorable, .noncharacter, .invisibleFiller, .invisibleFiller])
+    #expect(suspicious.highestRiskLevel == .high)
+
+    let hangul = HiddenTextAnalyzer.inspect("\u{1100}\u{3164}")
+    let khmer = HiddenTextAnalyzer.inspect("\u{1780}\u{17B4}")
+    #expect(hangul.findings.first?.context == .orthographicShaping)
+    #expect(khmer.findings.first?.context == .orthographicShaping)
+    #expect(hangul.isClean && khmer.isClean)
+}
+
+@Test("Preserves paired embeddings and notation layout but never bidi overrides")
+func recognizesFunctionalLayoutAndBalancedBidi() {
+    let embedding = HiddenTextAnalyzer.inspect("English \u{202B}العربية\u{202C}")
+    let override = HiddenTextAnalyzer.inspect("English \u{202E}txt\u{202C}")
+    let hieroglyph = HiddenTextAnalyzer.inspect("\u{13000}\u{13430}\u{13001}")
+    #expect(embedding.findings.allSatisfy { $0.context == .bidirectionalText })
+    #expect(embedding.isClean)
+    #expect(override.findings.contains { $0.codePoint == "U+202E" && $0.riskLevel == .high })
+    #expect(hieroglyph.findings.first?.context == .layoutFormatting)
+    #expect(hieroglyph.isClean)
+}
+
+@Test("Covers Unicode carriers omitted by generic format classification")
+func coversUnicodeCarrierGap() {
+    let carriers = HiddenTextAnalyzer.inspect(
+        "A\u{2061}B\u{206A}C\u{FFF9}D\u{E0001}E"
+    )
+    #expect(carriers.findings.map(\.kind) == [
+        .zeroWidth, .bidirectional, .layoutControl, .tag
+    ])
+    #expect(carriers.findings.map(\.displayName) == [
+        "FUNCTION APPLICATION",
+        "INHIBIT SYMMETRIC SWAPPING",
+        "INTERLINEAR ANNOTATION ANCHOR",
+        "LANGUAGE TAG"
+    ])
+    #expect(carriers.findings.map(\.riskLevel) == [.medium, .high, .medium, .high])
+}
+
+@Test("Preserves real orthographic context and rejects floating lookalikes")
+func refinesUnicodeContextBoundaries() {
+    let arabicNumber = HiddenTextAnalyzer.inspect("\u{0600}\u{0661}")
+    let kaithiNumber = HiddenTextAnalyzer.inspect("\u{110BD}\u{11083}")
+    let conjoiningHangul = HiddenTextAnalyzer.inspect("\u{1100}\u{115F}")
+    let tibetanJoiner = HiddenTextAnalyzer.inspect("\u{0F40}\u{200D}\u{0F42}")
+    for functional in [arabicNumber, kaithiNumber, conjoiningHangul, tibetanJoiner] {
+        #expect(functional.isClean)
+        #expect(functional.findings.allSatisfy { $0.riskLevel == .clear })
+    }
+
+    let floatingOrthographic = HiddenTextAnalyzer.inspect("A\u{0600}B")
+    let nonCJKSelector = HiddenTextAnalyzer.inspect("Ж\u{FE00}")
+    let cjkSelector = HiddenTextAnalyzer.inspect("邊\u{FE00}")
+    #expect(floatingOrthographic.actionableFindings.count == 1)
+    #expect(nonCJKSelector.actionableFindings.count == 1)
+    #expect(cjkSelector.isClean)
+}

@@ -476,6 +476,92 @@ public enum FindingReportFormatter {
         )
     }
 
+    public static func identifierReport(
+        _ analysis: OpaqueIdentifierAnalysis,
+        language: AppLanguage
+    ) -> String {
+        report(
+            title: localized("Signal Sieve — Opaque Identifier Findings", language),
+            summary: countSummary(analysis.findings.count, language),
+            entries: analysis.findings.map { finding in
+                [
+                    field("Type", localized(finding.kind.rawValue, language), language),
+                    field("Value", finding.value, language),
+                    field("Line", String(finding.line), language),
+                    field("Column", String(finding.column), language)
+                ].joined(separator: "\n")
+            }
+        )
+    }
+
+    public static func scamReport(
+        _ analysis: ScamAttemptAnalysis,
+        language: AppLanguage
+    ) -> String {
+        report(
+            title: localized("Signal Sieve — Possible Scam Findings", language),
+            summary: [
+                field("Risk score", "\(analysis.score)/100", language),
+                field("Assessment", localized(analysis.threatLevel.rawValue, language), language),
+                localized("This is a local risk estimate, not proof of fraud. No link was opened or contacted.", language)
+            ].joined(separator: "\n"),
+            entries: analysis.signals.map { signal in
+                [
+                    localized(signal.kind.rawValue, language),
+                    field("Evidence", signal.evidence, language),
+                    field(
+                        "Reason",
+                        AppLocalization.scamSignalDetail(signal.kind, language: language),
+                        language
+                    )
+                ].joined(separator: "\n")
+            }
+        )
+    }
+
+    public static func linkSanitizationFinding(
+        _ finding: LinkSanitizationFinding,
+        language: AppLanguage
+    ) -> String {
+        var lines = [
+            "\(localized(finding.platform.rawValue, language)) — \(localized(finding.treatment.rawValue, language))",
+            field("Mechanism", localized(finding.mechanism.rawValue, language), language)
+        ]
+        if !finding.parameterNames.isEmpty {
+            lines.append(field(
+                "Parameters",
+                finding.parameterNames.sorted().joined(separator: ", "),
+                language
+            ))
+        }
+        lines.append(field("Original", finding.originalURL, language))
+        lines.append(field("Result", finding.resultingURL, language))
+        return lines.joined(separator: "\n")
+    }
+
+    public static func linkSanitizationReport(
+        _ result: URLCleaningResult,
+        language: AppLanguage
+    ) -> String {
+        report(
+            title: localized("Signal Sieve — Link Sanitization Report", language),
+            summary: [
+                field("Links analyzed", String(result.linksFound), language),
+                field("Links changed", String(result.linksChanged), language),
+                field("Parameters removed", String(result.removedParameterCount), language),
+                field("Opaque redirects not resolved", String(result.unresolvedRedirectCount), language),
+                localized("No network request was made.", language),
+                localized(
+                    "Pixels, cookies, fingerprinting, server-side APIs, and in-app telemetry are outside clipboard scope.",
+                    language
+                )
+            ].joined(separator: "\n"),
+            entries: result.findings.map {
+                linkSanitizationFinding($0, language: language)
+            }
+        )
+    }
+
     private static func report(title: String, summary: String, entries: [String]) -> String {
         ([title, summary] + entries.enumerated().map { index, entry in
             "\(index + 1). \(entry)"
