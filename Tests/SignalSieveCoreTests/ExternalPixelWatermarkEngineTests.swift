@@ -80,6 +80,31 @@ func rejectsEscapingPixelModuleExecutable() throws {
     }
 }
 
+@Test("External pixel bridge rejects non-finite strength before staging files")
+func rejectsInvalidExternalPixelStrength() {
+    let root = FileManager.default.temporaryDirectory
+    let module = ExternalPixelWatermarkModule(
+        rootURL: root,
+        executableURL: root.appendingPathComponent("unused"),
+        manifest: PixelWatermarkModuleManifest(
+            schemaVersion: 1,
+            name: "Fixture",
+            version: "1",
+            executable: "unused",
+            capabilities: [.regenerate],
+            license: "Test"
+        )
+    )
+    #expect(throws: ExternalPixelWatermarkError.invalidStrength) {
+        try ExternalPixelWatermarkEngine.regenerateCopy(
+            imageURL: root.appendingPathComponent("missing.png"),
+            destinationURL: root.appendingPathComponent("missing-output.png"),
+            strength: .nan,
+            using: module
+        )
+    }
+}
+
 private let onePixelPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII="
 
 private let pixelModuleScript = """

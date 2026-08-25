@@ -472,6 +472,8 @@ struct PixelWatermarkModuleView: View {
             "The selected module does not declare that capability."
         case .invalidImage, .inputTooLarge:
             "The selected image could not be staged safely."
+        case .invalidStrength:
+            "Regeneration strength must be a finite value from 0.05 through 0.70."
         case .dimensionsChanged:
             "The module changed the image dimensions, so the output was rejected."
         case .noPixelChange:

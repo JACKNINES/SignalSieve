@@ -73,6 +73,10 @@ public struct ScamAttemptAnalysis: Sendable, Equatable {
 /// definitively fraudulent.
 public enum ScamAttemptDetector {
     public static let alertThreshold = 50
+    /// Scam messages are short. Sampling both boundaries keeps URL/brand regex
+    /// work bounded for pasted books while retaining the common message/link
+    /// layouts. Hidden-Unicode analysis still scans the complete input.
+    public static let maximumAnalysisCharacters = 64_000
 
     private struct Brand {
         let canonicalWords: Set<String>
@@ -106,6 +110,7 @@ public enum ScamAttemptDetector {
     private static let urlExpression = try? NSRegularExpression(pattern: #"(?i)https?://[^\s<>\"']+"#)
 
     public static func analyze(_ text: String) -> ScamAttemptAnalysis {
+        let text = boundedAnalysisSample(text)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return ScamAttemptAnalysis(score: 0, threatLevel: .review, signals: [], inspectedHosts: [])
         }
@@ -206,6 +211,12 @@ public enum ScamAttemptDetector {
         let total = min(100, scoreByKind.values.reduce(0, +))
         let level: ScamThreatLevel = total >= 75 ? .high : (total >= alertThreshold ? .suspicious : .review)
         return ScamAttemptAnalysis(score: total, threatLevel: level, signals: signals, inspectedHosts: hosts)
+    }
+
+    private static func boundedAnalysisSample(_ text: String) -> String {
+        guard text.count > maximumAnalysisCharacters else { return text }
+        let half = maximumAnalysisCharacters / 2
+        return String(text.prefix(half)) + "\n" + String(text.suffix(half))
     }
 
     private static func wordMatches(in text: String) -> [String] {

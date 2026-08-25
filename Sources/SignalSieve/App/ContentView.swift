@@ -33,39 +33,10 @@ struct ContentView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            controls
-            Divider()
-
-            editors
-                .frame(minHeight: 330)
-
-            Divider()
-            findingsPanel
-            if model.identifierAnalysis.containsIdentifiers
-                || !model.scamAnalysis.signals.isEmpty
-                || model.adaptiveAnalysis.isAnomalous {
-                Divider()
-                ScrollView {
-                    ThreatInsightsView(
-                        identifiers: model.identifierAnalysis,
-                        scam: model.scamAnalysis,
-                        adaptive: model.adaptiveAnalysis,
-                        adaptiveSampleCount: model.adaptiveModelSampleCount,
-                        isAdaptiveEnabled: model.isAdaptiveModelEnabled,
-                        language: model.language,
-                        onCopy: model.copyFindingText
-                    )
-                }
-                .frame(minHeight: 130, maxHeight: 210)
+            ScrollView(.vertical) {
+                workspaceContent
             }
-            if model.binaryAnalysis.isDetected {
-                Divider()
-                binaryGuardPanel
-            }
-            if model.codeAnalysis.isLikelyCode {
-                Divider()
-                codeGuardPanel
-            }
+            .scrollIndicators(.automatic)
             Divider()
             statusBar
         }
@@ -163,6 +134,49 @@ struct ContentView: View {
                 onUseResult: { model.output = $0 }
             )
         }
+    }
+
+    /// The analysis stack grows when contextual tools such as Code Guard,
+    /// Binary Guard, or Threat Insights appear. Keeping that stack inside one
+    /// vertical viewport prevents SwiftUI from compressing or clipping the
+    /// editors and gives every dynamic panel a reachable scroll position.
+    private var workspaceContent: some View {
+        VStack(spacing: 0) {
+            controls
+            Divider()
+
+            editors
+                .frame(minHeight: 330, idealHeight: 390)
+
+            Divider()
+            findingsPanel
+            if model.identifierAnalysis.containsIdentifiers
+                || !model.scamAnalysis.signals.isEmpty
+                || model.adaptiveAnalysis.isAnomalous {
+                Divider()
+                ScrollView {
+                    ThreatInsightsView(
+                        identifiers: model.identifierAnalysis,
+                        scam: model.scamAnalysis,
+                        adaptive: model.adaptiveAnalysis,
+                        adaptiveSampleCount: model.adaptiveModelSampleCount,
+                        isAdaptiveEnabled: model.isAdaptiveModelEnabled,
+                        language: model.language,
+                        onCopy: model.copyFindingText
+                    )
+                }
+                .frame(minHeight: 130, maxHeight: 210)
+            }
+            if model.binaryAnalysis.isDetected {
+                Divider()
+                binaryGuardPanel
+            }
+            if model.codeAnalysis.isLikelyCode {
+                Divider()
+                codeGuardPanel
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var header: some View {
@@ -416,10 +430,10 @@ struct ContentView: View {
             )
             Divider()
             Toggle(
-                model.localized("Automatically prepare a Safe Clean Result from Input"),
+                model.localized("Automatically prepare Result from Input using the selected protocol"),
                 isOn: $model.automaticallyPreparesInputResult
             )
-            Text(model.localized("When enabled, pasting or typing in Input immediately prepares reviewable Safe Clean output. Disable it to keep Result unchanged until you choose a cleaning action."))
+            Text(model.localized("When enabled, Input prepares Result with the selected Safe Clean, Strict Clean, or Visual Transfer protocol. With automatic cleaning off, Result remains unchanged."))
             Divider()
             Text(model.formatted(
                 "Automatic cleaning: %@",
@@ -646,7 +660,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(model.localized("Findings")).font(.headline)
-                Text("\(model.inspection.findings.count)")
+                Text("\(model.inspection.totalFindingCount)")
                     .font(.caption.monospacedDigit())
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)

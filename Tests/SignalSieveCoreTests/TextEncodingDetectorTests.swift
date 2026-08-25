@@ -29,3 +29,10 @@ func executableRemainsBinary() {
     let data = Data([0x7F, 0x45, 0x4C, 0x46, 0x02, 0x00, 0x00, 0x00])
     #expect(BinaryContentDetector.analyze(data).kind == .rawBinary)
 }
+
+@Test("Rejects malformed UTF-8 and truncated BOM-prefixed code units")
+func rejectsMalformedTextEncodings() {
+    #expect(TextEncodingDetector.decode(Data([0xC3, 0x28])) == nil)
+    #expect(TextEncodingDetector.decode(Data([0xFF, 0xFE, 0x41])) == nil)
+    #expect(TextEncodingDetector.decode(Data([0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00])) == nil)
+}

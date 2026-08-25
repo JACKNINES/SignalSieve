@@ -107,11 +107,21 @@ public struct TextInspection: Sendable, Equatable {
     public let findings: [HiddenElement]
     public let changesUnderNFC: Bool
     public let changesUnderNFKC: Bool
+    /// Findings beyond the bounded evidence list. Signal Sieve still scans
+    /// every scalar and includes these values in risk/count decisions.
+    public let omittedFindingCount: Int
+    public let omittedActionableFindingCount: Int
+    public let highestOmittedRiskLevel: HiddenElementRiskLevel?
 
     public var actionableFindings: [HiddenElement] { findings.filter(\.isActionable) }
-    public var isClean: Bool { actionableFindings.isEmpty }
+    public var totalFindingCount: Int { findings.count + omittedFindingCount }
+    public var totalActionableFindingCount: Int {
+        actionableFindings.count + omittedActionableFindingCount
+    }
+    public var isClean: Bool { totalActionableFindingCount == 0 }
     public var highestRiskLevel: HiddenElementRiskLevel? {
-        actionableFindings.map(\.riskLevel).max { $0.rawValue < $1.rawValue }
+        (actionableFindings.map(\.riskLevel) + [highestOmittedRiskLevel].compactMap { $0 })
+            .max { $0.rawValue < $1.rawValue }
     }
 
     public init(
@@ -119,17 +129,27 @@ public struct TextInspection: Sendable, Equatable {
         utf16Count: Int,
         findings: [HiddenElement],
         changesUnderNFC: Bool,
-        changesUnderNFKC: Bool
+        changesUnderNFKC: Bool,
+        omittedFindingCount: Int = 0,
+        omittedActionableFindingCount: Int = 0,
+        highestOmittedRiskLevel: HiddenElementRiskLevel? = nil
     ) {
         self.scalarCount = scalarCount
         self.utf16Count = utf16Count
         self.findings = findings
         self.changesUnderNFC = changesUnderNFC
         self.changesUnderNFKC = changesUnderNFKC
+        self.omittedFindingCount = omittedFindingCount
+        self.omittedActionableFindingCount = omittedActionableFindingCount
+        self.highestOmittedRiskLevel = highestOmittedRiskLevel
     }
 }
 
 public enum HiddenTextAnalyzer {
+    /// Prevents an adversarial carrier-only document from materializing
+    /// millions of UI/report objects. Detection counts and maximum risk remain
+    /// complete even when evidence is truncated.
+    public static let maximumReportedFindings = 10_000
     struct ScalarAssessment: Sendable, Equatable {
         let kind: HiddenElementKind
         let context: HiddenElementContext
@@ -234,13 +254,16 @@ public enum HiddenTextAnalyzer {
 
     public static func inspect(_ text: String) -> TextInspection {
         var findings: [HiddenElement] = []
+        findings.reserveCapacity(min(maximumReportedFindings, text.unicodeScalars.count))
+        var omittedFindingCount = 0
+        var omittedActionableFindingCount = 0
+        var highestOmittedRiskLevel: HiddenElementRiskLevel?
         var utf16Position = 0
         let scalars = Array(text.unicodeScalars)
 
         for (index, scalar) in scalars.enumerated() {
             if let assessment = assess(scalars, at: index) {
-                findings.append(
-                    HiddenElement(
+                let finding = HiddenElement(
                         id: findings.count,
                         scalarPosition: index + 1,
                         utf16Position: utf16Position + 1,
@@ -250,7 +273,21 @@ public enum HiddenTextAnalyzer {
                         context: assessment.context,
                         riskLevel: assessment.riskLevel
                     )
-                )
+                if findings.count < maximumReportedFindings {
+                    findings.append(finding)
+                } else {
+                    omittedFindingCount += 1
+                    if finding.isActionable {
+                        omittedActionableFindingCount += 1
+                        if let current = highestOmittedRiskLevel {
+                            if finding.riskLevel.rawValue > current.rawValue {
+                                highestOmittedRiskLevel = finding.riskLevel
+                            }
+                        } else {
+                            highestOmittedRiskLevel = finding.riskLevel
+                        }
+                    }
+                }
             }
             utf16Position += scalar.utf16.count
         }
@@ -262,7 +299,10 @@ public enum HiddenTextAnalyzer {
             utf16Count: text.utf16.count,
             findings: findings,
             changesUnderNFC: !text.unicodeScalars.elementsEqual(nfc.unicodeScalars),
-            changesUnderNFKC: !text.unicodeScalars.elementsEqual(nfkc.unicodeScalars)
+            changesUnderNFKC: !text.unicodeScalars.elementsEqual(nfkc.unicodeScalars),
+            omittedFindingCount: omittedFindingCount,
+            omittedActionableFindingCount: omittedActionableFindingCount,
+            highestOmittedRiskLevel: highestOmittedRiskLevel
         )
     }
 

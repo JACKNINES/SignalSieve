@@ -67,6 +67,10 @@ public struct CodeLanguageDetection: Sendable, Equatable {
 }
 
 public enum CodeLanguageDetector {
+    /// Language classification is heuristic; bounding its regex sample avoids
+    /// blocking Active Guard on book-sized clipboard values. Unicode security
+    /// scanning remains independent and examines the complete text.
+    public static let maximumClassificationCharacters = 64_000
     private struct Rule {
         let language: CodeLanguage
         let pattern: String
@@ -222,7 +226,8 @@ public enum CodeLanguageDetector {
     }
 
     public static func detect(_ text: String) -> CodeLanguageDetection {
-        let sample = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sample = boundedClassificationSample(text)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !sample.isEmpty else {
             return CodeLanguageDetection(
                 isLikelyCode: false,
@@ -306,6 +311,12 @@ public enum CodeLanguageDetector {
             confidence: confidence,
             evidenceScore: topScore
         )
+    }
+
+    private static func boundedClassificationSample(_ text: String) -> String {
+        guard text.count > maximumClassificationCharacters else { return text }
+        let half = maximumClassificationCharacters / 2
+        return String(text.prefix(half)) + "\n" + String(text.suffix(half))
     }
 
     private static func genericCodeScore(_ text: String) -> Int {

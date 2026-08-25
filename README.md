@@ -150,10 +150,11 @@ they contain no real account, organization, or third-party message data.
   green and yellow alerts, or hide green through orange alerts. The two
   visibility choices are mutually exclusive, and red alerts cannot be disabled.
 - **Automatic Input Result** is enabled by default. Pasting or typing in the
-  Input editor immediately prepares Safe Clean text in Result for review; it
-  never copies or shares that output automatically. The behavior can be turned
-  off from Copying Settings when the user wants Result to remain untouched
-  until a manual cleaning action is selected.
+  Input editor prepares Result with the selected Safe Clean, Strict Clean, or
+  Visual Transfer protocol. OCR is debounced, bounded, and discarded if Input
+  or the selected protocol changes before it finishes. With automatic cleaning
+  off, Result remains unchanged. It never copies or shares output automatically,
+  and the behavior can be disabled from Copying Settings.
 - Detects zero-width characters, invisible mathematical operators,
   bidirectional and deprecated directional controls, variation selectors,
   Unicode tags, script fillers, orthographic/layout controls, reserved

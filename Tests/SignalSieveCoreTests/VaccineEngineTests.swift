@@ -81,6 +81,90 @@ func refusesChangedFiles() throws {
     #expect(try String(contentsOf: sourceURL, encoding: .utf8) == changed)
 }
 
+@Test("Vaccine reports a file removed after scanning instead of recreating it")
+func refusesRemovedFiles() throws {
+    let manager = FileManager.default
+    let temporary = manager.temporaryDirectory
+        .appendingPathComponent("SignalSieveVaccineRemoved-\(UUID().uuidString)", isDirectory: true)
+    let sourceURL = temporary.appendingPathComponent("main.py")
+    defer { try? manager.removeItem(at: temporary) }
+    try manager.createDirectory(at: temporary, withIntermediateDirectories: true)
+    try Data("def main():\n    value\u{200B} = 1\n".utf8).write(to: sourceURL)
+    let report = try VaccineEngine.scan(rootURL: temporary)
+    try manager.removeItem(at: sourceURL)
+
+    let result = try VaccineEngine.vaccinate(
+        report,
+        backupBaseURL: temporary.appendingPathComponent("Backups")
+    )
+    #expect(result.sanitizedFileCount == 0)
+    #expect(result.filesChangedSinceScan == ["main.py"])
+    #expect(!manager.fileExists(atPath: sourceURL.path))
+}
+
+@Test("Vaccine maps a missing scan root to its defensive domain error")
+func rejectsMissingVaccineRoot() {
+    let missing = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SignalSieveMissing-\(UUID().uuidString)", isDirectory: true)
+    do {
+        _ = try VaccineEngine.scan(rootURL: missing)
+        Issue.record("Vaccine accepted a missing root")
+    } catch VaccineError.invalidRoot {
+        // Expected defensive error.
+    } catch {
+        Issue.record("Unexpected error: \(error)")
+    }
+}
+
+@Test("Vaccine counts directory enumeration permission failures")
+func countsVaccinePermissionFailures() throws {
+    let manager = FileManager.default
+    let temporary = manager.temporaryDirectory
+        .appendingPathComponent("SignalSieveVaccinePermissions-\(UUID().uuidString)", isDirectory: true)
+    let locked = temporary.appendingPathComponent("locked", isDirectory: true)
+    let hidden = locked.appendingPathComponent("hidden.py")
+    defer {
+        try? manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: locked.path)
+        try? manager.removeItem(at: temporary)
+    }
+    try manager.createDirectory(at: locked, withIntermediateDirectories: true)
+    try Data("value\u{200B} = 1".utf8).write(to: hidden)
+    try manager.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+
+    let report = try VaccineEngine.scan(rootURL: temporary)
+    #expect(report.skippedFileCount >= 1)
+    #expect(report.findings.isEmpty)
+}
+
+@Test("Vaccine reports an unavailable backup destination without touching the source")
+func refusesUnavailableBackupDestination() throws {
+    let manager = FileManager.default
+    let temporary = manager.temporaryDirectory
+        .appendingPathComponent("SignalSieveVaccineBackupPermissions-\(UUID().uuidString)", isDirectory: true)
+    let project = temporary.appendingPathComponent("Project", isDirectory: true)
+    let locked = temporary.appendingPathComponent("Locked", isDirectory: true)
+    let sourceURL = project.appendingPathComponent("main.py")
+    let original = "def main():\n    value\u{200B} = 1\n"
+    defer {
+        try? manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: locked.path)
+        try? manager.removeItem(at: temporary)
+    }
+    try manager.createDirectory(at: project, withIntermediateDirectories: true)
+    try manager.createDirectory(at: locked, withIntermediateDirectories: true)
+    try Data(original.utf8).write(to: sourceURL)
+    let report = try VaccineEngine.scan(rootURL: project)
+    try manager.setAttributes([.posixPermissions: 0o500], ofItemAtPath: locked.path)
+
+    do {
+        _ = try VaccineEngine.vaccinate(report, backupBaseURL: locked)
+        Issue.record("Vaccine wrote without a usable backup destination")
+    } catch VaccineError.backupFailed {
+        #expect(try String(contentsOf: sourceURL, encoding: .utf8) == original)
+    } catch {
+        Issue.record("Unexpected error: \(error)")
+    }
+}
+
 @Test("Vaccine recognizes and refuses to modify SignalSieve itself")
 func blocksSignalSieveSelfVaccination() throws {
     let manager = FileManager.default

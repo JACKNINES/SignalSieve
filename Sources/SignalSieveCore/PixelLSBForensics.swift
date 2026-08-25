@@ -40,6 +40,7 @@ public enum PixelLSBForensicsError: Error, Sendable, Equatable {
     case imageTooLarge
     case couldNotRender
     case couldNotEncode
+    case invalidStrength
 }
 
 /// A deterministic, model-free screen for classic LSB carrier regularity.
@@ -129,9 +130,11 @@ public enum PixelLSBForensics {
         _ data: Data,
         strength: Double
     ) throws -> Data {
+        guard strength.isFinite, (0.05...0.70).contains(strength) else {
+            throw PixelLSBForensicsError.invalidStrength
+        }
         var raster = try rasterize(data)
-        let boundedStrength = min(0.70, max(0.05, strength))
-        let coverage = min(1, 0.45 + boundedStrength / 1.20)
+        let coverage = min(1, 0.45 + strength / 1.20)
         let threshold = UInt64(coverage * Double(UInt32.max))
 
         for y in 0..<raster.height {

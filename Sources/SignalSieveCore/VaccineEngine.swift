@@ -197,7 +197,12 @@ public enum VaccineEngine {
         let root = rootURL.standardizedFileURL
         let selfTarget = isSignalSieveTarget(root)
         let ignoreRules = SignalSieveIgnore.load(from: root)
-        let rootValues = try root.resourceValues(forKeys: [.isDirectoryKey, .isReadableKey])
+        let rootValues: URLResourceValues
+        do {
+            rootValues = try root.resourceValues(forKeys: [.isDirectoryKey, .isReadableKey])
+        } catch {
+            throw VaccineError.invalidRoot
+        }
         guard rootValues.isDirectory == true, rootValues.isReadable != false else {
             throw VaccineError.invalidRoot
         }
@@ -205,11 +210,15 @@ public enum VaccineEngine {
         let keys: [URLResourceKey] = [
             .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey
         ]
+        var enumerationErrorCount = 0
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: keys,
             options: [.skipsPackageDescendants],
-            errorHandler: { _, _ in true }
+            errorHandler: { _, _ in
+                enumerationErrorCount += 1
+                return true
+            }
         ) else { throw VaccineError.cannotEnumerate }
 
         var scanned = 0
@@ -269,6 +278,10 @@ public enum VaccineEngine {
             let data: Data
             do { data = try Data(contentsOf: fileURL, options: [.mappedIfSafe]) }
             catch {
+                skipped += 1
+                continue
+            }
+            guard data.count <= maximumFileSize else {
                 skipped += 1
                 continue
             }
@@ -386,7 +399,7 @@ public enum VaccineEngine {
             scannedFileCount: scanned,
             binaryFileCount: binary,
             provenanceScannedFileCount: provenanceScanned,
-            skippedFileCount: skipped,
+            skippedFileCount: skipped + enumerationErrorCount,
             excludedDirectoryCount: excludedDirectories,
             ignoredPathCount: ignoredPaths,
             isSignalSieveTarget: selfTarget,
@@ -438,6 +451,7 @@ public enum VaccineEngine {
             guard values?.isRegularFile == true, values?.isSymbolicLink != true,
                   isDescendant(finding.fileURL, of: report.rootURL),
                   let data = try? Data(contentsOf: finding.fileURL),
+                  data.count <= maximumFileSize,
                   fingerprint(data) == finding.fingerprint,
                   let decodedFile = TextEncodingDetector.decode(data) else {
                 changedSinceScan.append(finding.relativePath)
@@ -468,10 +482,14 @@ public enum VaccineEngine {
             plans.append((finding, data, sanitizedData, result.removedCount, result.replacedCount))
         }
 
-        try FileManager.default.createDirectory(
-            at: backupURL,
-            withIntermediateDirectories: true
-        )
+        do {
+            try FileManager.default.createDirectory(
+                at: backupURL,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            throw VaccineError.backupFailed(report.rootURL.lastPathComponent)
+        }
         for plan in plans {
             let destination = backupURL.appendingPathComponent(plan.finding.relativePath)
             do {
@@ -490,6 +508,15 @@ public enum VaccineEngine {
         for plan in plans {
             let backup = backupURL.appendingPathComponent(plan.finding.relativePath)
             do {
+                let currentValues = try plan.finding.fileURL.resourceValues(
+                    forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
+                )
+                guard currentValues.isRegularFile == true,
+                      currentValues.isSymbolicLink != true,
+                      isDescendant(plan.finding.fileURL, of: report.rootURL),
+                      try Data(contentsOf: plan.finding.fileURL, options: [.mappedIfSafe]) == plan.data else {
+                    throw VaccineError.writeFailed(plan.finding.relativePath)
+                }
                 let attributes = try? FileManager.default.attributesOfItem(atPath: plan.finding.fileURL.path)
                 try plan.sanitizedData.write(to: plan.finding.fileURL, options: [.atomic])
                 if let permissions = attributes?[.posixPermissions] {

@@ -47,7 +47,7 @@ public struct ClipboardProtectionAnalysis: Sendable, Equatable {
         !inspection.isClean || covertChannelReport.hasSuspiciousChannel
     }
     public var hiddenTextFindingCount: Int {
-        inspection.actionableFindings.count + covertChannelReport.findings.count
+        inspection.totalActionableFindingCount + covertChannelReport.findings.count
     }
     public var hiddenTextRiskLevel: HiddenElementRiskLevel? {
         [inspection.highestRiskLevel, covertChannelReport.highestRiskLevel]

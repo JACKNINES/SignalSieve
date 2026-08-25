@@ -23,6 +23,7 @@ public enum CommunityWatermarkServiceError: Error, Sendable, Equatable {
     case emptyText
     case inputTooLarge
     case couldNotStart
+    case invalidTimeout
     case timedOut
     case serviceUnavailable
     case responseTooLarge
@@ -40,6 +41,7 @@ public enum CommunityWatermarkService {
     public static let maximumTextBytes = 1 * 1_024 * 1_024
     public static let maximumResponseBytes = 2 * 1_024 * 1_024
     public static let defaultTimeout: TimeInterval = 20
+    public static let maximumTimeout: TimeInterval = 600
 
     public static func health(timeout: TimeInterval = 4) throws -> CommunityWatermarkServiceHealth {
         let data = try request(path: "/health", method: "GET", body: nil, timeout: timeout)
@@ -92,8 +94,10 @@ public enum CommunityWatermarkService {
         _ data: Data,
         operation: CommunityWatermarkOperation
     ) throws -> CommunityWatermarkServiceResult {
-        guard data.count <= maximumResponseBytes,
-              var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard data.count <= maximumResponseBytes else {
+            throw CommunityWatermarkServiceError.responseTooLarge
+        }
+        guard var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw CommunityWatermarkServiceError.invalidResponse
         }
         guard let succeeded = object["ok"] as? Bool else {
@@ -155,9 +159,16 @@ public enum CommunityWatermarkService {
               ["GET", "POST"].contains(method) else {
             throw CommunityWatermarkServiceError.invalidResponse
         }
+        guard timeout.isFinite, timeout > 0, timeout <= maximumTimeout else {
+            throw CommunityWatermarkServiceError.invalidTimeout
+        }
         let work = FileManager.default.temporaryDirectory
             .appendingPathComponent("SignalSieveCommunityEngine-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: work.path
+        )
         defer { try? FileManager.default.removeItem(at: work) }
         let outputURL = work.appendingPathComponent("response.json")
         let errorURL = work.appendingPathComponent("stderr.txt")
@@ -166,8 +177,16 @@ public enum CommunityWatermarkService {
             try body.write(to: bodyURL, options: [.atomic])
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: bodyURL.path)
         }
-        guard FileManager.default.createFile(atPath: outputURL.path, contents: nil),
-              FileManager.default.createFile(atPath: errorURL.path, contents: nil),
+        guard FileManager.default.createFile(
+                atPath: outputURL.path,
+                contents: nil,
+                attributes: [.posixPermissions: 0o600]
+              ),
+              FileManager.default.createFile(
+                atPath: errorURL.path,
+                contents: nil,
+                attributes: [.posixPermissions: 0o600]
+              ),
               let errorHandle = try? FileHandle(forWritingTo: errorURL) else {
             throw CommunityWatermarkServiceError.couldNotStart
         }
@@ -178,7 +197,7 @@ public enum CommunityWatermarkService {
         var arguments = [
             "--silent", "--show-error", "--fail-with-body",
             "--noproxy", "*", "--connect-timeout", "2",
-            "--max-time", String(Int(max(1, timeout))),
+            "--max-time", String(Int(ceil(timeout))),
             "--request", method, "--output", outputURL.path
         ]
         if body != nil {
@@ -219,7 +238,19 @@ public enum CommunityWatermarkService {
         guard process.terminationStatus == 0 else {
             throw CommunityWatermarkServiceError.serviceUnavailable
         }
-        guard let response = try? Data(contentsOf: outputURL), response.count <= maximumResponseBytes else {
+        return try readBoundedResponse(at: outputURL)
+    }
+
+    static func readBoundedResponse(at url: URL) throws -> Data {
+        let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        guard values?.isRegularFile == true, values?.isSymbolicLink != true else {
+            throw CommunityWatermarkServiceError.invalidResponse
+        }
+        guard let size = values?.fileSize, size <= maximumResponseBytes else {
+            throw CommunityWatermarkServiceError.responseTooLarge
+        }
+        guard let response = try? Data(contentsOf: url, options: .mappedIfSafe),
+              response.count <= maximumResponseBytes else {
             throw CommunityWatermarkServiceError.responseTooLarge
         }
         return response

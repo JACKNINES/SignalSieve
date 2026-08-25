@@ -63,6 +63,15 @@ func spectralScreenDoesNotVerdictTinyImages() throws {
     #expect(!report.isElevated)
 }
 
+@Test("Rejects non-finite and out-of-policy spectral regeneration strengths")
+func rejectsInvalidSpectralStrengths() {
+    for strength in [Double.nan, Double.infinity, -Double.infinity, 0.0, 0.71] {
+        #expect(throws: PixelSpectralForensicsError.invalidStrength) {
+            try PixelSpectralForensics.regenerate(Data(), strength: strength)
+        }
+    }
+}
+
 private func encodeSpectralTestPNG(
     _ pixels: [UInt8],
     width: Int,

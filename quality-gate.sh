@@ -216,6 +216,47 @@ else
     fi
 fi
 
+# Defensive-analysis invariants. These prevent later refactors from silently
+# removing the bounds and serialization verified by adversarial regression
+# tests in this repository.
+if ! grep -F 'private actor ClipboardAnalysisWorker' \
+        "$PROJECT_ROOT/Sources/SignalSieve/App/SignalSieveViewModel.swift" >/dev/null \
+    || ! grep -F 'guard pasteboard.changeCount == expectedChangeCount' \
+        "$PROJECT_ROOT/Sources/SignalSieve/App/SignalSieveViewModel.swift" >/dev/null; then
+    print -u2 "Active Guard lost its serial off-main worker or stale-pasteboard guard."
+    exit 1
+fi
+if ! grep -F 'public static let maximumReportedFindings = 10_000' \
+        "$PROJECT_ROOT/Sources/SignalSieveCore/HiddenTextAnalyzer.swift" >/dev/null \
+    || ! grep -F 'omittedActionableFindingCount' \
+        "$PROJECT_ROOT/Sources/SignalSieveCore/HiddenTextAnalyzer.swift" >/dev/null; then
+    print -u2 "Hidden Unicode evidence is no longer bounded with complete risk accounting."
+    exit 1
+fi
+if ! grep -F 'timeout.isFinite' \
+        "$PROJECT_ROOT/Sources/SignalSieveCore/CommunityWatermarkService.swift" >/dev/null \
+    || ! grep -F 'readBoundedResponse(at: outputURL)' \
+        "$PROJECT_ROOT/Sources/SignalSieveCore/CommunityWatermarkService.swift" >/dev/null; then
+    print -u2 "Community Engine timeout or response-size preflight was removed."
+    exit 1
+fi
+for pixel_source in \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/PixelLSBForensics.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/PixelSpectralForensics.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/ExternalPixelWatermarkEngine.swift"; do
+    if ! grep -F 'strength.isFinite' "$pixel_source" >/dev/null; then
+        print -u2 "A pixel regeneration path no longer rejects non-finite strength: $pixel_source"
+        exit 1
+    fi
+done
+if ! grep -F 'data.count.isMultiple(of: 2)' \
+        "$PROJECT_ROOT/Sources/SignalSieveCore/TextEncodingDetector.swift" >/dev/null \
+    || ! grep -F 'data.count.isMultiple(of: 4)' \
+        "$PROJECT_ROOT/Sources/SignalSieveCore/TextEncodingDetector.swift" >/dev/null; then
+    print -u2 "Strict UTF-16/UTF-32 code-unit validation was removed."
+    exit 1
+fi
+
 if ! SOURCE_SYMLINK="$(
     find "$PROJECT_ROOT/Sources" "$PROJECT_ROOT/Tests" -type l -print -quit
 )"; then

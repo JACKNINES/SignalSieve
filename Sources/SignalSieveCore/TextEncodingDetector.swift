@@ -86,6 +86,14 @@ public enum TextEncodingDetector {
         as encoding: TextEncodingKind,
         hadBOM: Bool
     ) -> DecodedTextFile? {
+        switch encoding {
+        case .utf8:
+            break
+        case .utf16LittleEndian, .utf16BigEndian:
+            guard data.count.isMultiple(of: 2) else { return nil }
+        case .utf32LittleEndian, .utf32BigEndian:
+            guard data.count.isMultiple(of: 4) else { return nil }
+        }
         guard let text = String(data: Data(data), encoding: foundationEncoding(for: encoding)) else {
             return nil
         }

@@ -142,7 +142,7 @@ struct CommunityEnginesView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
             if let cleaned = result.cleanedText {
-                let residual = HiddenTextAnalyzer.inspect(cleaned).actionableFindings.count
+                let residual = HiddenTextAnalyzer.inspect(cleaned).totalActionableFindingCount
                     + CovertTextChannelAnalyzer.analyze(cleaned).findings.count
                 HStack {
                     Text(formatted("Signal Sieve reanalysis: %d native text risk(s) remain.", residual))
@@ -224,6 +224,7 @@ struct CommunityEnginesView: View {
         case .emptyText: "There is no text to send to the community engine."
         case .inputTooLarge: "The text is too large for the bounded community-engine bridge."
         case .couldNotStart: "Signal Sieve could not start the fixed local curl process."
+        case .invalidTimeout: "The community-engine timeout was outside the defensive limit."
         case .timedOut: "The local community engine timed out."
         case .serviceUnavailable: "No compatible watermarks-remover service answered on 127.0.0.1:8765."
         case .responseTooLarge: "The community engine response exceeded the safety limit."

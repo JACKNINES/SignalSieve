@@ -17,6 +17,18 @@ func detectsHiddenElements() {
     #expect(result.findings[0].codePoint == "U+200B")
 }
 
+@Test("Bounds retained Unicode evidence without losing total count or maximum risk")
+func boundsAdversarialUnicodeEvidence() {
+    let mediumCarrier = String(repeating: "\u{200B}", count: HiddenTextAnalyzer.maximumReportedFindings + 1)
+    let report = HiddenTextAnalyzer.inspect(mediumCarrier + "\u{202E}")
+
+    #expect(report.findings.count == HiddenTextAnalyzer.maximumReportedFindings)
+    #expect(report.omittedFindingCount == 2)
+    #expect(report.totalActionableFindingCount == HiddenTextAnalyzer.maximumReportedFindings + 2)
+    #expect(report.highestRiskLevel == .high)
+    #expect(!report.isClean)
+}
+
 @Test("Classifies ALM, LRM, and RLM as bidirectional controls")
 func classifiesDirectionalMarks() {
     let result = HiddenTextAnalyzer.inspect("A\u{061C}B\u{200E}C\u{200F}D")

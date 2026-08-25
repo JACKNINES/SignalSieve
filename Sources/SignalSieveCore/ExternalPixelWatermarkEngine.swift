@@ -131,6 +131,7 @@ public enum ExternalPixelWatermarkError: Error, Sendable, Equatable {
     case capabilityUnavailable
     case invalidImage
     case inputTooLarge
+    case invalidStrength
     case destinationMatchesSource
     case destinationAlreadyExists
     case couldNotStart
@@ -248,6 +249,9 @@ public enum ExternalPixelWatermarkEngine {
         guard module.supports(.regenerate) else {
             throw ExternalPixelWatermarkError.capabilityUnavailable
         }
+        guard strength.isFinite, (0.05...0.70).contains(strength) else {
+            throw ExternalPixelWatermarkError.invalidStrength
+        }
         let source = imageURL.standardizedFileURL
         let destination = destinationURL.standardizedFileURL
         guard source != destination else {
@@ -286,7 +290,7 @@ public enum ExternalPixelWatermarkEngine {
                     "regenerate",
                     "--input", stagedURL.path,
                     "--output", generatedURL.path,
-                    "--strength", String(format: "%.3f", min(max(strength, 0.05), 0.70)),
+                    "--strength", String(format: "%.3f", strength),
                     "--json"
                 ],
                 workURL: workURL,

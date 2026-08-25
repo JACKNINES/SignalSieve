@@ -4,6 +4,91 @@ import Combine
 import Foundation
 import SignalSieveCore
 
+private struct ClipboardCoreAnalysis: Sendable {
+    let copiedCodeAnalysis: CodeGuardAnalysis
+    let initialLinkCleaning: URLCleaningResult
+    let effectiveText: String
+    let linkWasPreparedForAutomaticCleaning: Bool
+    let automationResult: ClipboardAutomationResult
+    let shouldFlattenRichText: Bool
+    let originalAnalysis: ClipboardProtectionAnalysis
+    let finalAnalysis: ClipboardProtectionAnalysis
+    let finalLinkCleaning: URLCleaningResult
+}
+
+/// Serializes CPU-heavy clipboard work away from AppKit's main actor. Pending
+/// cancelled requests are discarded before they allocate analysis state, so a
+/// burst of copy events cannot create an unbounded detached-task storm.
+private actor ClipboardAnalysisWorker {
+    func analyze(
+        text: String,
+        recentPatternTexts: [String],
+        customRules: [CustomURLRule],
+        automaticallyCleansLinks: Bool,
+        automationProtocol: ClipboardAutomationProtocol,
+        typeInventory: ClipboardTypeInventory,
+        isPrivacySensitive: Bool
+    ) -> ClipboardCoreAnalysis? {
+        guard !Task.isCancelled else { return nil }
+        let copiedCodeAnalysis = CodeGuardAnalyzer.analyze(text)
+        let initialLinkCleaning = URLTrackerCleaner.cleanLinks(in: text, customRules: customRules)
+        let hasNonTextRepresentation = typeInventory.kinds.contains(.image)
+            || typeInventory.kinds.contains(.fileURL)
+        let mayRewritePlainText = !copiedCodeAnalysis.isLikelyCode
+            && !hasNonTextRepresentation
+            && !isPrivacySensitive
+
+        var effectiveText = text
+        var linkWasPreparedForAutomaticCleaning = false
+        if automaticallyCleansLinks,
+           mayRewritePlainText,
+           initialLinkCleaning.linksChanged > 0 {
+            effectiveText = initialLinkCleaning.text
+            linkWasPreparedForAutomaticCleaning = true
+        }
+        let automationResult = ClipboardAutomationPolicy.transform(
+            effectiveText,
+            using: automationProtocol,
+            isLikelyCode: copiedCodeAnalysis.isLikelyCode,
+            hasNonTextRepresentation: hasNonTextRepresentation,
+            isPrivacySensitive: isPrivacySensitive
+        )
+        effectiveText = automationResult.text
+        let shouldFlattenRichText = ClipboardAutomationPolicy.shouldFlattenRichText(
+            using: automationProtocol,
+            hasRichTextRepresentation: typeInventory.containsRichTextRepresentation,
+            skipReason: automationResult.skipReason
+        )
+        let originalAnalysis = ClipboardProtectionAnalyzer.analyze(
+            text,
+            recentPatternTexts: recentPatternTexts,
+            customRules: customRules
+        )
+        let finalAnalysis = effectiveText == text
+            ? originalAnalysis
+            : ClipboardProtectionAnalyzer.analyze(
+                effectiveText,
+                recentPatternTexts: [],
+                customRules: customRules
+            )
+        let finalLinkCleaning = effectiveText == text
+            ? initialLinkCleaning
+            : URLTrackerCleaner.cleanLinks(in: effectiveText, customRules: customRules)
+        guard !Task.isCancelled else { return nil }
+        return ClipboardCoreAnalysis(
+            copiedCodeAnalysis: copiedCodeAnalysis,
+            initialLinkCleaning: initialLinkCleaning,
+            effectiveText: effectiveText,
+            linkWasPreparedForAutomaticCleaning: linkWasPreparedForAutomaticCleaning,
+            automationResult: automationResult,
+            shouldFlattenRichText: shouldFlattenRichText,
+            originalAnalysis: originalAnalysis,
+            finalAnalysis: finalAnalysis,
+            finalLinkCleaning: finalLinkCleaning
+        )
+    }
+}
+
 @MainActor
 final class SignalSieveViewModel: ObservableObject {
     @Published var input = ""
@@ -94,6 +179,9 @@ final class SignalSieveViewModel: ObservableObject {
                 clipboardAutomationProtocol.rawValue,
                 forKey: PreferenceKey.clipboardAutomationProtocol
             )
+            if automaticallyPreparesInputResult {
+                prepareAutomaticInputResult()
+            }
         }
     }
     @Published var automaticallyCleansLinks: Bool {
@@ -107,6 +195,9 @@ final class SignalSieveViewModel: ObservableObject {
             )
             if automaticallyPreparesInputResult {
                 prepareAutomaticInputResult()
+            } else {
+                automaticInputResultTask?.cancel()
+                automaticInputResultTask = nil
             }
         }
     }
@@ -116,7 +207,10 @@ final class SignalSieveViewModel: ObservableObject {
     private let defaults: UserDefaults
     private let noticePanel = ClipboardNoticePanelController()
     private var clipboardMonitor: AnyCancellable?
+    private let clipboardAnalysisWorker = ClipboardAnalysisWorker()
+    private var clipboardAnalysisTask: Task<Void, Never>?
     private var automaticVisualTransferTask: Task<Void, Never>?
+    private var automaticInputResultTask: Task<Void, Never>?
     private var lastPasteboardChangeCount = NSPasteboard.general.changeCount
     private var openMainWindow: (() -> Void)?
     private var adaptiveCopyModel: AdaptiveCopyModel
@@ -291,11 +385,77 @@ final class SignalSieveViewModel: ObservableObject {
     }
 
     private func prepareAutomaticInputResult() {
-        guard let prepared = InputResultAutomationPolicy.prepareSafeResult(
+        automaticInputResultTask?.cancel()
+        automaticInputResultTask = nil
+
+        if let prepared = InputResultAutomationPolicy.prepareDeterministicResult(
             from: input,
-            isEnabled: automaticallyPreparesInputResult
+            isEnabled: automaticallyPreparesInputResult,
+            using: clipboardAutomationProtocol
+        ) {
+            output = prepared
+            return
+        }
+
+        guard InputResultAutomationPolicy.shouldUseVisualTransfer(
+            isEnabled: automaticallyPreparesInputResult,
+            using: clipboardAutomationProtocol
         ) else { return }
-        output = prepared
+
+        let source = input
+        guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            output = ""
+            return
+        }
+        guard source.count <= ClipboardAutomationPolicy.maximumAutomaticVisualTransferCharacterCount else {
+            output = ""
+            status = formatted(
+                "Automatic Visual Transfer skipped text longer than %d characters.",
+                ClipboardAutomationPolicy.maximumAutomaticVisualTransferCharacterCount
+            )
+            return
+        }
+
+        // Never leave a Result produced for an older Input visible while OCR
+        // is preparing the replacement. Debouncing avoids starting Vision for
+        // every intermediate keystroke.
+        output = ""
+        automaticInputResultTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled else { return }
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try VisualTransfer.roundTrip(source)
+                }.value
+                guard !Task.isCancelled, let self else { return }
+                guard self.automaticallyPreparesInputResult,
+                      self.clipboardAutomationProtocol == .visualTransfer,
+                      self.input == source else { return }
+                guard ClipboardAutomationPolicy.acceptsAutomaticVisualTransfer(
+                    original: source,
+                    candidate: result.text
+                ) else {
+                    self.status = self.localized("Automatic Visual Transfer did not prepare Result because OCR changed a URL, number, quotation, or produced an unsafe result.")
+                    return
+                }
+                self.output = result.text
+                self.status = self.formatted(
+                    "Automatic Visual Transfer prepared Result with local OCR: %d characters recognized. Review it before use.",
+                    result.recognizedCharacterCount
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled, let self else { return }
+                guard self.automaticallyPreparesInputResult,
+                      self.clipboardAutomationProtocol == .visualTransfer,
+                      self.input == source else { return }
+                self.status = self.formatted(
+                    "Automatic Visual Transfer could not prepare Result: %@",
+                    error.localizedDescription
+                )
+            }
+        }
     }
 
     func copyOutput() {
@@ -361,10 +521,10 @@ final class SignalSieveViewModel: ObservableObject {
         } else if inspection.isClean {
             status = formatted(
                 "Found %d functional Unicode element(s); no known hidden payload risk.",
-                inspection.findings.count
+                inspection.totalFindingCount
             )
         } else {
-            status = formatted("Found %d elements to review.", inspection.actionableFindings.count)
+            status = formatted("Found %d elements to review.", inspection.totalActionableFindingCount)
         }
     }
 
@@ -629,6 +789,8 @@ final class SignalSieveViewModel: ObservableObject {
     private func stopClipboardMonitoring() {
         clipboardMonitor?.cancel()
         clipboardMonitor = nil
+        clipboardAnalysisTask?.cancel()
+        clipboardAnalysisTask = nil
         automaticVisualTransferTask?.cancel()
         automaticVisualTransferTask = nil
         noticePanel.close()
@@ -642,6 +804,8 @@ final class SignalSieveViewModel: ObservableObject {
         lastPasteboardChangeCount = pasteboard.changeCount
         let capturedAt = Date()
         let sourceApplication = NSWorkspace.shared.frontmostApplication
+        let sourceApplicationName = sourceApplication?.localizedName
+        let sourceBundleIdentifier = sourceApplication?.bundleIdentifier
         let shouldStoreInHistory = Self.shouldStoreInClipboardHistory(pasteboard)
         let typeInventory = ClipboardTypeAnalyzer.analyze(
             typeIdentifiers: (pasteboard.types ?? []).map(\.rawValue)
@@ -686,38 +850,66 @@ final class SignalSieveViewModel: ObservableObject {
             return
         }
 
-        let copiedCodeAnalysis = CodeGuardAnalyzer.analyze(copiedText)
-        let initialLinkCleaning = URLTrackerCleaner.cleanLinks(in: copiedText, customRules: privateRules)
-        var effectiveText = copiedText
+        let expectedChangeCount = pasteboard.changeCount
+        let recentPatternTexts = patternTexts
+        let customRules = privateRules
+        let automaticLinkCleaning = automaticallyCleansLinks
+        let automationProtocol = clipboardAutomationProtocol
+        let isPrivacySensitive = !shouldStoreInHistory
+
+        clipboardAnalysisTask?.cancel()
+        clipboardAnalysisTask = Task { [weak self] in
+            guard let self else { return }
+            guard let prepared = await clipboardAnalysisWorker.analyze(
+                text: copiedText,
+                recentPatternTexts: recentPatternTexts,
+                customRules: customRules,
+                automaticallyCleansLinks: automaticLinkCleaning,
+                automationProtocol: automationProtocol,
+                typeInventory: typeInventory,
+                isPrivacySensitive: isPrivacySensitive
+            ), !Task.isCancelled else { return }
+            guard self.isActiveProtectionEnabled,
+                  self.automaticallyCleansLinks == automaticLinkCleaning,
+                  self.clipboardAutomationProtocol == automationProtocol else { return }
+            self.finishClipboardPoll(
+                copiedText: copiedText,
+                expectedChangeCount: expectedChangeCount,
+                capturedAt: capturedAt,
+                sourceApplicationName: sourceApplicationName,
+                sourceBundleIdentifier: sourceBundleIdentifier,
+                shouldStoreInHistory: shouldStoreInHistory,
+                typeInventory: typeInventory,
+                fileMetadataAlert: fileMetadataAlert,
+                prepared: prepared
+            )
+        }
+    }
+
+    private func finishClipboardPoll(
+        copiedText: String,
+        expectedChangeCount: Int,
+        capturedAt: Date,
+        sourceApplicationName: String?,
+        sourceBundleIdentifier: String?,
+        shouldStoreInHistory: Bool,
+        typeInventory: ClipboardTypeInventory,
+        fileMetadataAlert: Bool,
+        prepared: ClipboardCoreAnalysis
+    ) {
+        let pasteboard = NSPasteboard.general
+        guard pasteboard.changeCount == expectedChangeCount,
+              pasteboard.string(forType: .string) == copiedText else { return }
+
+        let copiedCodeAnalysis = prepared.copiedCodeAnalysis
+        let initialLinkCleaning = prepared.initialLinkCleaning
+        var effectiveText = prepared.effectiveText
         let hasNonTextRepresentation = typeInventory.kinds.contains(.image)
             || typeInventory.kinds.contains(.fileURL)
         let isPrivacySensitive = !shouldStoreInHistory
-
-        let mayRewritePlainText = !copiedCodeAnalysis.isLikelyCode
-            && !hasNonTextRepresentation
-            && !isPrivacySensitive
-
-        var linkWasPreparedForAutomaticCleaning = false
-        if automaticallyCleansLinks,
-           mayRewritePlainText,
-           initialLinkCleaning.linksChanged > 0 {
-            effectiveText = initialLinkCleaning.text
-            linkWasPreparedForAutomaticCleaning = true
-        }
-
-        let automationResult = ClipboardAutomationPolicy.transform(
-            effectiveText,
-            using: clipboardAutomationProtocol,
-            isLikelyCode: copiedCodeAnalysis.isLikelyCode,
-            hasNonTextRepresentation: hasNonTextRepresentation,
-            isPrivacySensitive: isPrivacySensitive
-        )
-        effectiveText = automationResult.text
-        let shouldFlattenRichText = ClipboardAutomationPolicy.shouldFlattenRichText(
-            using: clipboardAutomationProtocol,
-            hasRichTextRepresentation: typeInventory.containsRichTextRepresentation,
-            skipReason: automationResult.skipReason
-        )
+        let linkWasPreparedForAutomaticCleaning = prepared.linkWasPreparedForAutomaticCleaning
+        let automationResult = prepared.automationResult
+        let shouldFlattenRichText = prepared.shouldFlattenRichText
 
         var automaticallyCleaned = false
         var automaticTextCleaningApplied = false
@@ -770,21 +962,13 @@ final class SignalSieveViewModel: ObservableObject {
         // Detection and alert priority use the original copy. Automatic
         // cleaning must never erase the evidence that decides whether a red
         // warning remains mandatory.
-        let analysis = ClipboardProtectionAnalyzer.analyze(
-            copiedText,
-            recentPatternTexts: patternTexts,
-            customRules: privateRules
-        )
+        let analysis = prepared.originalAnalysis
         let finalClipboardAnalysis = effectiveText == copiedText
             ? analysis
-            : ClipboardProtectionAnalyzer.analyze(
-                effectiveText,
-                recentPatternTexts: [],
-                customRules: privateRules
-            )
+            : prepared.finalAnalysis
         let finalLinkCleaning = effectiveText == copiedText
             ? initialLinkCleaning
-            : URLTrackerCleaner.cleanLinks(in: effectiveText, customRules: privateRules)
+            : prepared.finalLinkCleaning
         let automaticCleaningAudit = clipboardAutomationProtocol.cleaningMode.map { mode in
             ClipboardAutomaticCleaningAudit(
                 mode: mode,
@@ -823,8 +1007,8 @@ final class SignalSieveViewModel: ObservableObject {
             let entry = ClipboardHistory.makeEntry(
                 text: copiedText,
                 capturedAt: capturedAt,
-                sourceApplicationName: sourceApplication?.localizedName,
-                sourceBundleIdentifier: sourceApplication?.bundleIdentifier,
+                sourceApplicationName: sourceApplicationName,
+                sourceBundleIdentifier: sourceBundleIdentifier,
                 hiddenUnicodeCount: analysis.hiddenTextFindingCount,
                 codeRiskCount: analysis.codeAnalysis.findings.count,
                 trackedLinkCount: initialLinkCleaning.linksFlagged,

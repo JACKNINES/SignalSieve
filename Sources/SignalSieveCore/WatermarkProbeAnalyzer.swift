@@ -109,7 +109,7 @@ public enum WatermarkProbeAnalyzer {
     public static func analyze(_ text: String) -> WatermarkProbeReport {
         let allTokens = tokens(text)
         let sentenceTokens = sentences(in: text)
-        let hiddenCount = HiddenTextAnalyzer.inspect(text).actionableFindings.count
+        let hiddenCount = HiddenTextAnalyzer.inspect(text).totalActionableFindingCount
 
         let repeatedRatio = repeatedNGramRatio(allTokens, length: 3)
         let lexicalDiversity = movingWindowLexicalDiversity(allTokens, windowSize: 50)

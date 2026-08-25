@@ -44,3 +44,43 @@ func parsesCommunityServiceRejection() throws {
         try CommunityWatermarkService.parseResult(payload, operation: .inspect)
     }
 }
+
+@Test("Community bridge rejects invalid timeouts before starting a process")
+func rejectsInvalidCommunityTimeouts() {
+    for timeout in [Double.nan, Double.infinity, -Double.infinity, 0, -1, 601] {
+        #expect(throws: CommunityWatermarkServiceError.invalidTimeout) {
+            try CommunityWatermarkService.health(timeout: timeout)
+        }
+    }
+}
+
+@Test("Community bridge distinguishes oversized and malformed responses")
+func rejectsHostileCommunityResponses() throws {
+    let oversized = Data(repeating: 0x41, count: CommunityWatermarkService.maximumResponseBytes + 1)
+    #expect(throws: CommunityWatermarkServiceError.responseTooLarge) {
+        try CommunityWatermarkService.parseResult(oversized, operation: .inspect)
+    }
+    #expect(throws: CommunityWatermarkServiceError.invalidResponse) {
+        try CommunityWatermarkService.parseResult(Data("{\"ok\":".utf8), operation: .inspect)
+    }
+    let badBase64 = try JSONSerialization.data(withJSONObject: [
+        "ok": true,
+        "cleaned": "%%%not-base64%%%"
+    ])
+    #expect(throws: CommunityWatermarkServiceError.invalidResponse) {
+        try CommunityWatermarkService.parseResult(badBase64, operation: .clean)
+    }
+}
+
+@Test("Community bridge checks file size before loading a response")
+func boundsCommunityResponseFileBeforeRead() throws {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SignalSieveOversizedCommunity-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try Data(repeating: 0x41, count: CommunityWatermarkService.maximumResponseBytes + 1)
+        .write(to: url)
+
+    #expect(throws: CommunityWatermarkServiceError.responseTooLarge) {
+        try CommunityWatermarkService.readBoundedResponse(at: url)
+    }
+}

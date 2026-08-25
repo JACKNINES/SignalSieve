@@ -59,6 +59,15 @@ func boundsTinyLSBSamples() throws {
     #expect(!report.isElevated)
 }
 
+@Test("Rejects non-finite and out-of-policy LSB regeneration strengths")
+func rejectsInvalidLSBStrengths() {
+    for strength in [Double.nan, Double.infinity, -Double.infinity, 0.0, 0.71] {
+        #expect(throws: PixelLSBForensicsError.invalidStrength) {
+            try PixelLSBForensics.regenerate(Data(), strength: strength)
+        }
+    }
+}
+
 private func encodeRGBA(_ pixels: [UInt8], width: Int, height: Int) throws -> Data {
     var mutable = pixels
     let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))

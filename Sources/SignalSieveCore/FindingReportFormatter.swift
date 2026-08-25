@@ -30,8 +30,11 @@ public enum FindingReportFormatter {
     ) -> String {
         report(
             title: localized("Signal Sieve — Hidden Unicode Findings", language),
-            summary: countSummary(inspection.findings.count, language),
+            summary: countSummary(inspection.totalFindingCount, language),
             entries: inspection.findings.map { hiddenFinding($0, language: language) }
+                + (inspection.omittedFindingCount > 0
+                    ? [localized("Additional findings were counted but omitted from this bounded report.", language)]
+                    : [])
         )
     }
 

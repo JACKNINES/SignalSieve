@@ -49,6 +49,7 @@ public enum PixelSpectralForensicsError: Error, Sendable, Equatable {
     case imageTooLarge
     case couldNotRender
     case couldNotEncode
+    case invalidStrength
 }
 
 /// A provider-neutral screen for weak, spatially periodic luminance carriers.
@@ -66,12 +67,14 @@ public enum PixelSpectralForensics {
     }
 
     public static func regenerate(_ data: Data, strength: Double) throws -> Data {
+        guard strength.isFinite, (0.05...0.70).contains(strength) else {
+            throw PixelSpectralForensicsError.invalidStrength
+        }
         var raster = try rasterize(data)
         let analysis = analyze(raster)
         let carrier = analysis.carrier
-        let boundedStrength = min(0.70, max(0.05, strength))
-        let gain = 0.55 + boundedStrength * 0.95
-        let maximumChannelChange = max(1, Int((2 + boundedStrength * 10).rounded()))
+        let gain = 0.55 + strength * 0.95
+        let maximumChannelChange = max(1, Int((2 + strength * 10).rounded()))
         let twoPi = 2 * Double.pi
 
         for y in 0..<raster.height {

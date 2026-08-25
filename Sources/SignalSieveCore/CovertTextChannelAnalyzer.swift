@@ -90,8 +90,7 @@ public enum CovertTextChannelAnalyzer {
     ]
 
     public static func analyze(_ text: String) -> CovertTextChannelReport {
-        let located = locatedScalars(in: text)
-        guard located.count <= maximumInputScalars else {
+        guard let located = locatedScalars(in: text) else {
             return CovertTextChannelReport(findings: [])
         }
 
@@ -302,11 +301,13 @@ public enum CovertTextChannelAnalyzer {
         return Int((Double(dominant) / Double(gaps.count) * 100).rounded())
     }
 
-    private static func locatedScalars(in text: String) -> [LocatedScalar] {
+    private static func locatedScalars(in text: String) -> [LocatedScalar]? {
         var result: [LocatedScalar] = []
+        result.reserveCapacity(min(maximumInputScalars, text.unicodeScalars.count))
         var line = 1
         var column = 1
         for (position, scalar) in text.unicodeScalars.enumerated() {
+            guard position < maximumInputScalars else { return nil }
             result.append(LocatedScalar(scalar: scalar, position: position + 1, line: line, column: column))
             if scalar.value == 0x0A {
                 line += 1
