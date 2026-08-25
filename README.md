@@ -21,6 +21,53 @@ proof of authorship, malicious intent, AI generation, or guaranteed watermark
 removal. Please read [SECURITY.md](SECURITY.md) before using mutation features
 on important files.
 
+## Quickstart
+
+On an Apple-silicon Mac, install the latest public build into your personal
+Applications folder with the [GitHub CLI](https://cli.github.com/):
+
+```sh
+install_root="$(mktemp -d)"
+gh release download --repo JACKNINES/SignalSieve --pattern 'Signal-Sieve-*-macOS-arm64.zip' --dir "$install_root"
+ditto -x -k "$install_root"/Signal-Sieve-*-macOS-arm64.zip "$install_root/unpacked"
+mkdir -p "$HOME/Applications" && ditto "$install_root/unpacked/Signal Sieve.app" "$HOME/Applications/Signal Sieve.app"
+```
+
+Launch Signal Sieve and create a safe, synthetic clipboard example in two
+lines:
+
+```sh
+open "$HOME/Applications/Signal Sieve.app"
+printf '%s' 'Review https://example.com/report?utm_source=demo' | pbcopy
+```
+
+Active Guard should report the removable `utm_source` tracker without
+contacting the example domain. Because the current build is not notarized, the
+first launch may require the macOS confirmation described in
+[Download the macOS app](#download-the-macos-app). Signal Sieve itself does not
+require the GitHub CLI after installation; users who prefer Finder can install
+the DMG instead.
+
+## Clear use cases
+
+Signal Sieve is designed for:
+
+- **Privacy-conscious users** reviewing copied text and removing known tracking
+  parameters before sharing links.
+- **Developers and code reviewers** inspecting source snippets and project
+  folders for hidden Unicode, bidirectional controls, confusable identifiers,
+  unexpected encodings, and unsafe clipboard representations.
+- **Security and watermark researchers** studying deterministic text carriers,
+  statistical writing signals, metadata, and optional community detectors with
+  explicit evidence and false-positive boundaries.
+- **Journalists, educators, and researchers** checking copied material and
+  creating clean metadata copies locally before publication or collaboration.
+- **Open-source maintainers** who want reproducible tests, reviewable cleaners,
+  and an optional compatibility harness for independently maintained engines.
+
+It is not an authorship detector, malware scanner, or guarantee that every
+provider-specific watermark has been found or removed.
+
 ## Download the macOS app
 
 Download the latest prebuilt application from
