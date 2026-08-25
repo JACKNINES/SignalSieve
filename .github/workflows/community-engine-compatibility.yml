@@ -134,8 +134,8 @@ jobs:
           {
             print '## Community Engine compatibility passed'
             print ''
-            print "- Signal Sieve commit: ${GITHUB_SHA}"
-            print "- watermarks-remover commit: ${UPSTREAM_REF}"
-            print '- Upstream tests: passed (optional dependency skips may apply)'
-            print '- Live health, capabilities, inspect, clean, and native residual analysis: passed'
+            print -r -- "- Signal Sieve commit: ${GITHUB_SHA}"
+            print -r -- "- watermarks-remover commit: ${UPSTREAM_REF}"
+            print -r -- '- Upstream tests: passed (optional dependency skips may apply)'
+            print -r -- '- Live health, capabilities, inspect, clean, and native residual analysis: passed'
           } >> "${GITHUB_STEP_SUMMARY}"
