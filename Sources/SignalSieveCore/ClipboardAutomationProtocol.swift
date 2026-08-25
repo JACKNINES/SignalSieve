@@ -8,6 +8,8 @@ public enum ClipboardAutomationProtocol: String, CaseIterable, Codable, Sendable
     case safeClean = "safe-clean"
     /// Strict Clean eligible text copies.
     case strictClean = "strict-clean"
+    /// Rebuild eligible text through a local bitmap and OCR boundary.
+    case visualTransfer = "visual-transfer"
 
     public static func persistedOrReviewAll(_ rawValue: String?) -> Self {
         // Versions before the alert-visibility setting stored this legacy
@@ -18,7 +20,7 @@ public enum ClipboardAutomationProtocol: String, CaseIterable, Codable, Sendable
 
     public var cleaningMode: CleaningMode? {
         switch self {
-        case .reviewAll: nil
+        case .reviewAll, .visualTransfer: nil
         case .safeClean: .safe
         case .strictClean: .strict
         }
@@ -80,6 +82,7 @@ public enum ClipboardAutomationSkipReason: String, Sendable, Equatable {
     case sourceCode
     case nonTextRepresentation
     case privacySensitiveClipboard
+    case inputTooLarge
 }
 
 public enum ClipboardAutomaticCleaningOutcome: Sendable, Equatable {
@@ -175,6 +178,55 @@ public struct ClipboardAutomationResult: Sendable, Equatable {
 
 /// Pure policy used by Active Guard before it writes anything to NSPasteboard.
 public enum ClipboardAutomationPolicy {
+    public static let maximumAutomaticVisualTransferCharacterCount = 4_000
+
+    public static func skipReason(
+        for selection: ClipboardAutomationProtocol,
+        text: String,
+        isLikelyCode: Bool,
+        hasNonTextRepresentation: Bool,
+        isPrivacySensitive: Bool
+    ) -> ClipboardAutomationSkipReason? {
+        guard selection != .reviewAll else { return nil }
+        if isPrivacySensitive { return .privacySensitiveClipboard }
+        if hasNonTextRepresentation { return .nonTextRepresentation }
+        if isLikelyCode { return .sourceCode }
+        if selection == .visualTransfer,
+           text.count > maximumAutomaticVisualTransferCharacterCount {
+            return .inputTooLarge
+        }
+        return nil
+    }
+
+    /// Strict Clean promises a plain-text result. HTML/RTF must therefore be
+    /// flattened even when its visible string needs no Unicode changes.
+    public static func shouldFlattenRichText(
+        using selection: ClipboardAutomationProtocol,
+        hasRichTextRepresentation: Bool,
+        skipReason: ClipboardAutomationSkipReason?
+    ) -> Bool {
+        selection == .strictClean
+            && hasRichTextRepresentation
+            && skipReason == nil
+    }
+
+    /// Automatic OCR is lossy. Reject candidates that alter values for which
+    /// a transcription error has disproportionate impact.
+    public static func acceptsAutomaticVisualTransfer(
+        original: String,
+        candidate: String
+    ) -> Bool {
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let report = RewriteIntegrityAnalyzer.analyze(
+            original: original,
+            candidate: candidate
+        )
+        return !report.hasProtectedValueChanges
+            && report.assessment != .codeNotSupported
+            && report.assessment != .inputTooLarge
+    }
+
     public static func transform(
         _ text: String,
         using selection: ClipboardAutomationProtocol,
@@ -182,23 +234,22 @@ public enum ClipboardAutomationPolicy {
         hasNonTextRepresentation: Bool,
         isPrivacySensitive: Bool
     ) -> ClipboardAutomationResult {
-        guard let mode = selection.cleaningMode else {
+        guard selection != .reviewAll else {
             return ClipboardAutomationResult(text: text)
         }
-        guard !isPrivacySensitive else {
-            return ClipboardAutomationResult(
-                text: text,
-                skipReason: .privacySensitiveClipboard
-            )
+        if let skipReason = skipReason(
+            for: selection,
+            text: text,
+            isLikelyCode: isLikelyCode,
+            hasNonTextRepresentation: hasNonTextRepresentation,
+            isPrivacySensitive: isPrivacySensitive
+        ) {
+            return ClipboardAutomationResult(text: text, skipReason: skipReason)
         }
-        guard !hasNonTextRepresentation else {
-            return ClipboardAutomationResult(
-                text: text,
-                skipReason: .nonTextRepresentation
-            )
-        }
-        guard !isLikelyCode else {
-            return ClipboardAutomationResult(text: text, skipReason: .sourceCode)
+        guard let mode = selection.cleaningMode else {
+            // Visual Transfer is performed asynchronously by the app after
+            // this shared eligibility policy has accepted the copy.
+            return ClipboardAutomationResult(text: text)
         }
 
         let cleaned = TextCleaner.clean(text, mode: mode)

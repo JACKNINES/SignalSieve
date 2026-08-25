@@ -16,6 +16,10 @@ public struct ClipboardTypeInventory: Sendable, Equatable {
     public var requiresFileProvenanceReview: Bool {
         kinds.contains(.image) || kinds.contains(.fileURL)
     }
+
+    public var containsRichTextRepresentation: Bool {
+        kinds.contains(.html) || kinds.contains(.richText)
+    }
 }
 
 public enum ClipboardTypeAnalyzer {

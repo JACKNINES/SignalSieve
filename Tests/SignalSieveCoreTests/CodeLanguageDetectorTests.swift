@@ -86,3 +86,24 @@ func rejectsRustMatchProseFalsePositive() {
     #expect(rust.isLikelyCode)
     #expect(rust.primary == .rust)
 }
+
+@Test("Treats Rust enum cases as supporting evidence instead of standalone proof")
+func requiresContextForRustEnumCases() {
+    let proseSamples = [
+        "Some(people) prefer tea.",
+        "The result was Ok(according to the report).",
+        "Err(ata) is a fictional name in this sentence."
+    ]
+
+    for prose in proseSamples {
+        let detection = CodeLanguageDetector.detect(prose)
+        #expect(!detection.isLikelyCode, "Unexpected code classification for: \(prose)")
+        #expect(detection.primary == nil)
+    }
+
+    let rust = CodeLanguageDetector.detect(
+        "match result { Some(value) => value, None => 0 }"
+    )
+    #expect(rust.isLikelyCode)
+    #expect(rust.primary == .rust)
+}

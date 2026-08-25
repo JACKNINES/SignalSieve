@@ -410,13 +410,24 @@ struct ContentView: View {
                 model.localized("Automatically use Strict Clean for copied text"),
                 isOn: $model.usesAutomaticStrictClean
             )
+            Toggle(
+                model.localized("Automatically use Visual Transfer (OCR) for copied text"),
+                isOn: $model.usesAutomaticVisualTransfer
+            )
+            Divider()
+            Toggle(
+                model.localized("Automatically prepare a Safe Clean Result from Input"),
+                isOn: $model.automaticallyPreparesInputResult
+            )
+            Text(model.localized("When enabled, pasting or typing in Input immediately prepares reviewable Safe Clean output. Disable it to keep Result unchanged until you choose a cleaning action."))
             Divider()
             Text(model.formatted(
                 "Automatic cleaning: %@",
                 model.localized(clipboardProtocolName)
             ))
-            Text(model.localized("Safe Clean and Strict Clean are mutually exclusive. Alert visibility is a separate setting."))
-            Text(model.localized("Automatic text cleaning skips source code, files, images, and privacy-sensitive clipboard types."))
+            Text(model.localized("Safe Clean, Strict Clean, and Automatic Visual Transfer are mutually exclusive. Alert visibility is a separate setting."))
+            Text(model.localized("Automatic processing skips source code, files, images, privacy-sensitive clipboard types, and oversized OCR input."))
+            Text(model.localized("Automatic Visual Transfer uses local OCR and may change words or punctuation. It refuses to overwrite detected changes to URLs, numbers, or quotations."))
         } label: {
             Label(model.localized("Copying Settings"), systemImage: "arrow.triangle.2.circlepath")
                 .font(.system(size: 12, weight: .semibold))
@@ -560,6 +571,9 @@ struct ContentView: View {
             expandHelp: model.localized("Expand Input to full width"),
             text: $model.input
         )
+        .onChange(of: model.input) { _ in
+            model.inputDidChange()
+        }
     }
 
     private var resultPanel: some View {
@@ -948,6 +962,7 @@ struct ContentView: View {
         case .reviewAll: "Off"
         case .safeClean: "Automatic Safe Clean"
         case .strictClean: "Automatic Strict Clean"
+        case .visualTransfer: "Automatic Visual Transfer"
         }
     }
 

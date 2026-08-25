@@ -136,6 +136,12 @@ public issue. Provide the smallest synthetic reproduction possible.
   remote routing but does not sandbox that process. Signal Sieve never installs,
   launches, or updates it, and reanalyzes returned text before offering Result.
   See [COMMUNITY_ENGINES.md](COMMUNITY_ENGINES.md).
+- The release quality gate scans both in-process networking APIs and
+  network-capable subprocess executables. Only the fixed `/usr/bin/curl`
+  bridges in `LocalRewriteEngine.swift` and `CommunityWatermarkService.swift`
+  are allowlisted, and their numeric loopback endpoint literals are checked.
+  Adding another networking tool, a shell subprocess, or changing either
+  endpoint fails the release gate until the boundary is reviewed explicitly.
 
 SignalSieve reduces known text and URL tracking signals. It does not guarantee
 that arbitrary statistical or linguistic watermarks can be detected or

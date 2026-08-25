@@ -99,12 +99,24 @@ final class SignalSieveViewModel: ObservableObject {
     @Published var automaticallyCleansLinks: Bool {
         didSet { defaults.set(automaticallyCleansLinks, forKey: PreferenceKey.automaticLinkCleaning) }
     }
+    @Published var automaticallyPreparesInputResult: Bool {
+        didSet {
+            defaults.set(
+                automaticallyPreparesInputResult,
+                forKey: PreferenceKey.automaticInputResult
+            )
+            if automaticallyPreparesInputResult {
+                prepareAutomaticInputResult()
+            }
+        }
+    }
 
     private let privateRulesURL: URL
     private let adaptiveModelURL: URL
     private let defaults: UserDefaults
     private let noticePanel = ClipboardNoticePanelController()
     private var clipboardMonitor: AnyCancellable?
+    private var automaticVisualTransferTask: Task<Void, Never>?
     private var lastPasteboardChangeCount = NSPasteboard.general.changeCount
     private var openMainWindow: (() -> Void)?
     private var adaptiveCopyModel: AdaptiveCopyModel
@@ -137,6 +149,10 @@ final class SignalSieveViewModel: ObservableObject {
     var usesAutomaticStrictClean: Bool {
         get { clipboardAutomationProtocol == .strictClean }
         set { setClipboardProtocolOption(.strictClean, isSelected: newValue) }
+    }
+    var usesAutomaticVisualTransfer: Bool {
+        get { clipboardAutomationProtocol == .visualTransfer }
+        set { setClipboardProtocolOption(.visualTransfer, isSelected: newValue) }
     }
 
     var activeGuardLabel: String {
@@ -234,6 +250,11 @@ final class SignalSieveViewModel: ObservableObject {
             defaults: defaults,
             fallback: false
         )
+        self.automaticallyPreparesInputResult = Self.storedBool(
+            PreferenceKey.automaticInputResult,
+            defaults: defaults,
+            fallback: true
+        )
 
         do {
             if privateRulesURL == nil {
@@ -260,8 +281,21 @@ final class SignalSieveViewModel: ObservableObject {
 
     func paste() {
         input = NSPasteboard.general.string(forType: .string) ?? ""
+        prepareAutomaticInputResult()
         inspect()
         remember(text: input)
+    }
+
+    func inputDidChange() {
+        prepareAutomaticInputResult()
+    }
+
+    private func prepareAutomaticInputResult() {
+        guard let prepared = InputResultAutomationPolicy.prepareSafeResult(
+            from: input,
+            isEnabled: automaticallyPreparesInputResult
+        ) else { return }
+        output = prepared
     }
 
     func copyOutput() {
@@ -595,6 +629,8 @@ final class SignalSieveViewModel: ObservableObject {
     private func stopClipboardMonitoring() {
         clipboardMonitor?.cancel()
         clipboardMonitor = nil
+        automaticVisualTransferTask?.cancel()
+        automaticVisualTransferTask = nil
         noticePanel.close()
         status = localized("Active Guard is off.")
     }
@@ -677,10 +713,15 @@ final class SignalSieveViewModel: ObservableObject {
             isPrivacySensitive: isPrivacySensitive
         )
         effectiveText = automationResult.text
+        let shouldFlattenRichText = ClipboardAutomationPolicy.shouldFlattenRichText(
+            using: clipboardAutomationProtocol,
+            hasRichTextRepresentation: typeInventory.containsRichTextRepresentation,
+            skipReason: automationResult.skipReason
+        )
 
         var automaticallyCleaned = false
         var automaticTextCleaningApplied = false
-        if effectiveText != copiedText {
+        if effectiveText != copiedText || shouldFlattenRichText {
             automaticallyCleaned = replaceClipboard(
                 expectedText: copiedText,
                 replacement: effectiveText
@@ -698,6 +739,9 @@ final class SignalSieveViewModel: ObservableObject {
                     automationResult.removedCount,
                     automationResult.replacedCount
                 )
+            } else if shouldFlattenRichText {
+                automaticTextCleaningApplied = true
+                status = localized("Strict Clean converted this copy to plain text and removed its HTML or rich-text formatting.")
             } else if linkWasPreparedForAutomaticCleaning {
                 status = formatted(
                     "Active Guard automatically cleaned %d copied link(s).",
@@ -711,6 +755,16 @@ final class SignalSieveViewModel: ObservableObject {
         } else if let skipReason = automationResult.skipReason,
                   clipboardAutomationProtocol.cleaningMode != nil {
             status = localizedClipboardAutomationSkip(skipReason)
+        }
+
+        if clipboardAutomationProtocol == .visualTransfer {
+            scheduleAutomaticVisualTransfer(
+                text: effectiveText,
+                expectedChangeCount: NSPasteboard.general.changeCount,
+                isLikelyCode: copiedCodeAnalysis.isLikelyCode,
+                hasNonTextRepresentation: hasNonTextRepresentation,
+                isPrivacySensitive: isPrivacySensitive
+            )
         }
 
         // Detection and alert priority use the original copy. Automatic
@@ -1022,10 +1076,23 @@ final class SignalSieveViewModel: ObservableObject {
     ) {
         clipboardAutomationProtocol = selection
 
-        guard let mode = selection.cleaningMode else {
+        if selection == .reviewAll {
+            automaticVisualTransferTask?.cancel()
+            automaticVisualTransferTask = nil
             status = localized("Automatic text cleaning is off. Alert visibility is unchanged.")
             return
         }
+
+        if selection == .visualTransfer {
+            guard let notice else {
+                status = localized("Automatic Visual Transfer is on for eligible future text copies. OCR stays on this Mac, but its output must still be reviewed.")
+                return
+            }
+            scheduleAutomaticVisualTransfer(from: notice)
+            return
+        }
+
+        guard let mode = selection.cleaningMode else { return }
 
         guard let notice else {
             status = localized(selection == .safeClean
@@ -1060,12 +1127,17 @@ final class SignalSieveViewModel: ObservableObject {
                 || typeInventory.kinds.contains(.fileURL),
             isPrivacySensitive: !Self.shouldStoreInClipboardHistory(pasteboard)
         )
+        let shouldFlattenRichText = ClipboardAutomationPolicy.shouldFlattenRichText(
+            using: selection,
+            hasRichTextRepresentation: typeInventory.containsRichTextRepresentation,
+            skipReason: result.skipReason
+        )
 
         if let skipReason = result.skipReason {
             status = localizedClipboardAutomationSkip(skipReason)
             return
         }
-        guard result.didChange else {
+        guard result.didChange || shouldFlattenRichText else {
             status = localized(mode == .safe
                 ? "Safe Clean is automatic. The current copy needed no changes."
                 : "Strict Clean is automatic. The current copy needed no changes.")
@@ -1075,12 +1147,91 @@ final class SignalSieveViewModel: ObservableObject {
             status = localized("Clipboard Protocol was saved, but the current clipboard changed before cleaning.")
             return
         }
-        status = formatted(
-            "%@ cleaned the current copy: removed %d and replaced %d element(s).",
-            AppLocalization.text(mode == .safe ? "Safe Clean" : "Strict Clean", language: language),
-            result.removedCount,
-            result.replacedCount
+        status = shouldFlattenRichText && !result.didChange
+            ? localized("Strict Clean converted this copy to plain text and removed its HTML or rich-text formatting.")
+            : formatted(
+                "%@ cleaned the current copy: removed %d and replaced %d element(s).",
+                AppLocalization.text(mode == .safe ? "Safe Clean" : "Strict Clean", language: language),
+                result.removedCount,
+                result.replacedCount
+            )
+    }
+
+    private func scheduleAutomaticVisualTransfer(from notice: ClipboardNotice) {
+        let pasteboard = NSPasteboard.general
+        guard pasteboard.changeCount == notice.pasteboardChangeCount,
+              let currentText = pasteboard.string(forType: .string) else {
+            status = localized("Clipboard Protocol was saved, but the current clipboard changed before processing.")
+            return
+        }
+        let typeInventory = ClipboardTypeAnalyzer.analyze(
+            typeIdentifiers: (pasteboard.types ?? []).map(\.rawValue)
         )
+        scheduleAutomaticVisualTransfer(
+            text: currentText,
+            expectedChangeCount: pasteboard.changeCount,
+            isLikelyCode: CodeGuardAnalyzer.analyze(currentText).isLikelyCode,
+            hasNonTextRepresentation: typeInventory.requiresFileProvenanceReview,
+            isPrivacySensitive: !Self.shouldStoreInClipboardHistory(pasteboard)
+        )
+    }
+
+    private func scheduleAutomaticVisualTransfer(
+        text: String,
+        expectedChangeCount: Int,
+        isLikelyCode: Bool,
+        hasNonTextRepresentation: Bool,
+        isPrivacySensitive: Bool
+    ) {
+        if let skipReason = ClipboardAutomationPolicy.skipReason(
+            for: .visualTransfer,
+            text: text,
+            isLikelyCode: isLikelyCode,
+            hasNonTextRepresentation: hasNonTextRepresentation,
+            isPrivacySensitive: isPrivacySensitive
+        ) {
+            status = localizedClipboardAutomationSkip(skipReason)
+            return
+        }
+
+        automaticVisualTransferTask?.cancel()
+        status = localized("Automatic Visual Transfer is rebuilding this copy with local OCR…")
+        automaticVisualTransferTask = Task { [weak self] in
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try VisualTransfer.roundTrip(text)
+                }.value
+                guard !Task.isCancelled, let self else { return }
+                guard self.clipboardAutomationProtocol == .visualTransfer else { return }
+
+                let pasteboard = NSPasteboard.general
+                guard pasteboard.changeCount == expectedChangeCount,
+                      pasteboard.string(forType: .string) == text else {
+                    self.status = self.localized("The clipboard changed before Automatic Visual Transfer finished, so SignalSieve did not overwrite it.")
+                    return
+                }
+                guard ClipboardAutomationPolicy.acceptsAutomaticVisualTransfer(
+                    original: text,
+                    candidate: result.text
+                ) else {
+                    self.status = self.localized("Automatic Visual Transfer did not overwrite this copy because OCR changed a URL, number, quotation, or produced an unsafe result.")
+                    return
+                }
+
+                self.writeClipboard(result.text)
+                self.output = result.text
+                self.status = self.formatted(
+                    "Automatic Visual Transfer rebuilt this copy with local OCR: %d characters recognized. Review it before use.",
+                    result.recognizedCharacterCount
+                )
+            } catch {
+                guard !Task.isCancelled, let self else { return }
+                self.status = self.formatted(
+                    "Automatic Visual Transfer failed: %@",
+                    error.localizedDescription
+                )
+            }
+        }
     }
 
     private func localizedClipboardAutomationSkip(
@@ -1093,6 +1244,11 @@ final class SignalSieveViewModel: ObservableObject {
             localized("Clipboard Protocol was saved. Automatic text cleaning skipped a file or image representation.")
         case .privacySensitiveClipboard:
             localized("Clipboard Protocol was saved. Automatic text cleaning skipped privacy-sensitive clipboard content.")
+        case .inputTooLarge:
+            formatted(
+                "Automatic Visual Transfer skipped text longer than %d characters.",
+                ClipboardAutomationPolicy.maximumAutomaticVisualTransferCharacterCount
+            )
         }
     }
 
@@ -1122,15 +1278,18 @@ final class SignalSieveViewModel: ObservableObject {
     @discardableResult
     private func replaceClipboard(expectedText: String, replacement: String) -> Bool {
         let pasteboard = NSPasteboard.general
-        guard pasteboard.string(forType: .string) == expectedText else { return false }
-        writeClipboard(replacement)
+        guard ClipboardPlainTextWriter.replace(
+            on: pasteboard,
+            expectedText: expectedText,
+            replacement: replacement
+        ) else { return false }
+        lastPasteboardChangeCount = pasteboard.changeCount
         return true
     }
 
     private func writeClipboard(_ text: String) {
         let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        ClipboardPlainTextWriter.write(text, to: pasteboard)
         lastPasteboardChangeCount = pasteboard.changeCount
     }
 
@@ -1254,6 +1413,7 @@ final class SignalSieveViewModel: ObservableObject {
             PreferenceKey.hidesGreenAndYellowAlerts,
             PreferenceKey.clipboardAutomationProtocol,
             PreferenceKey.automaticLinkCleaning,
+            PreferenceKey.automaticInputResult,
             PreferenceKey.language
         ]
         for key in keys where defaults.object(forKey: key) == nil {
@@ -1303,6 +1463,7 @@ final class SignalSieveViewModel: ObservableObject {
         static let trackedLinkWarnings = "activeProtection.warn.trackedLinks"
         static let patternWarnings = "activeProtection.warn.patterns"
         static let automaticLinkCleaning = "activeProtection.autoCleanLinks"
+        static let automaticInputResult = "workspace.automaticSafeResult"
         static let language = "appearance.language"
         static let theme = "appearance.theme"
         static let legacyPreferencesMigrated = "migration.legacyExecutablePreferences.v1"

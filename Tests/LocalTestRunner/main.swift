@@ -1306,6 +1306,25 @@ enum LocalTestRunner {
             "A missing protocol did not fail closed to review-all"
         )
         try expect(
+            ClipboardAutomationProtocol.persistedOrReviewAll("visual-transfer") == .visualTransfer,
+            "Automatic Visual Transfer did not persist"
+        )
+        let richTextResult = ClipboardAutomationPolicy.transform(
+            "Guarda .build/vendor entre corridas",
+            using: .strictClean,
+            isLikelyCode: false,
+            hasNonTextRepresentation: false,
+            isPrivacySensitive: false
+        )
+        try expect(
+            ClipboardAutomationPolicy.shouldFlattenRichText(
+                using: .strictClean,
+                hasRichTextRepresentation: true,
+                skipReason: richTextResult.skipReason
+            ),
+            "Strict Clean retained an unchanged HTML/RTF representation"
+        )
+        try expect(
             ClipboardAlertVisibilityPolicy.shouldPresent(.standard, visibility: .showAll),
             "The visible setting hid a green/yellow warning"
         )

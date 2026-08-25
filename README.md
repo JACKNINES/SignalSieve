@@ -21,6 +21,40 @@ proof of authorship, malicious intent, AI generation, or guaranteed watermark
 removal. Please read [SECURITY.md](SECURITY.md) before using mutation features
 on important files.
 
+## Download the macOS app
+
+Download the latest prebuilt application from
+[GitHub Releases](https://github.com/JACKNINES/SignalSieve/releases/latest).
+The DMG is recommended: open it and drag **Signal Sieve.app** to the Applications
+shortcut. A ZIP containing the same app bundle is also provided. The current
+automated release supports Apple silicon (`arm64`) only. Both packages include
+the pinned PDF helper, so using the prebuilt app does not require Homebrew,
+CMake, Swift, or a source checkout.
+
+Each DMG and ZIP includes a neighboring `.sha256` file. You can verify either
+package in Terminal from the download folder:
+
+```sh
+shasum -a 256 -c Signal-Sieve-*.sha256
+```
+
+GitHub also publishes signed build provenance for both packages. With the
+[GitHub CLI](https://cli.github.com/) installed, verify the downloaded DMG with:
+
+```sh
+gh attestation verify Signal-Sieve-*.dmg -R JACKNINES/SignalSieve
+```
+
+The current public build is ad-hoc signed, not notarized with an Apple
+Developer ID. On macOS 15 Sequoia and later, first try to open
+**Signal Sieve.app** so macOS records the blocked launch. Then open **System
+Settings → Privacy & Security**, scroll to **Security**, click **Open Anyway**,
+authenticate, and confirm **Open** in the warning that appears. Apple makes
+**Open Anyway** available for approximately one hour after the blocked launch.
+Do not disable Gatekeeper or remove quarantine attributes globally. See
+[Apple's current instructions for opening an unnotarized app](https://support.apple.com/en-lamr/102445).
+A future notarized release can remove this extra confirmation.
+
 ## See it in action
 
 Signal Sieve does not silently claim that a problem is fixed. Automatic
@@ -103,13 +137,23 @@ they contain no real account, organization, or third-party message data.
   replace future copied links after removing known tracking parameters. It
   verifies that the clipboard has not changed before replacing anything and
   skips automatic link cleaning when the copied text is source code.
-- **Copying Settings** can automatically apply Safe Clean or Strict Clean to
-  eligible copied text. The two modes are mutually exclusive. Automatic
-  cleaning skips source code, files, images, and privacy-sensitive clipboard
-  types, then reanalyzes the result before reporting whether alerts were
-  removed or remain. Alert visibility is a separate setting: users may hide
+- **Copying Settings** can automatically apply Safe Clean, Strict Clean, or
+  Visual Transfer to eligible copied text. The three protocols are mutually
+  exclusive. Strict Clean also flattens HTML/RTF clipboard representations to
+  plain text, even when the visible characters themselves need no cleanup.
+  Automatic Visual Transfer performs the bitmap-to-OCR round trip locally,
+  limits input to 4,000 characters, and refuses to overwrite detected changes
+  to URLs, numbers, or quotations. Automatic processing skips source code,
+  files, images, and privacy-sensitive clipboard types. Deterministic cleaning
+  reanalyzes the result before reporting whether alerts were removed or remain.
+  Alert visibility is a separate setting: users may hide
   green and yellow alerts, or hide green through orange alerts. The two
   visibility choices are mutually exclusive, and red alerts cannot be disabled.
+- **Automatic Input Result** is enabled by default. Pasting or typing in the
+  Input editor immediately prepares Safe Clean text in Result for review; it
+  never copies or shares that output automatically. The behavior can be turned
+  off from Copying Settings when the user wants Result to remain untouched
+  until a manual cleaning action is selected.
 - Detects zero-width characters, invisible mathematical operators,
   bidirectional and deprecated directional controls, variation selectors,
   Unicode tags, script fillers, orthographic/layout controls, reserved
@@ -256,7 +300,10 @@ they contain no real account, organization, or third-party message data.
 - **Safe Clean:** removes dangerous controls while preserving elements that may
   be required by emoji and some writing systems.
 - **Strict Clean:** also removes variation selectors, invisible joiners, and
-  private-use characters. It may change the appearance of some emoji.
+  private-use characters. It may change the appearance of some emoji. When
+  used automatically, it replaces eligible HTML/RTF clipboard data with one
+  plain-text representation so copied styling cannot survive merely because
+  the visible string was unchanged.
 - **Reveal:** opens a local, read-only report for known invisible encodings.
   Valid Unicode Tag, variation-selector, and zero-width binary payloads are
   decoded into selectable text. Byte-aligned opaque payloads are shown as
@@ -265,7 +312,9 @@ they contain no real account, organization, or third-party message data.
 - **Visual Transfer:** renders the content to an in-memory bitmap and reads it
   back with Apple Vision, similar to Live Text. This removes data without a
   visual representation, but OCR may introduce errors. Always review the
-  result.
+  result. It is available as a manual tool and as a conservative automatic
+  copying protocol; the automatic form stays local and applies additional
+  size, content-type, and protected-value safety gates.
 - **Vaccine:** scans a user-selected project tree for the same Unicode and code
   risks, language signals, encoded payloads, binary files, and supported
   provenance/metadata structures. Metadata findings are review-only and never
@@ -308,7 +357,7 @@ they contain no real account, organization, or third-party message data.
   cannot invoke or upload Vaccine findings directly without custom integration.
   This is an automation limitation, not a weaker desktop scan.
 
-## Requirements
+## Requirements for source builds
 
 - macOS 13 or later. A currently supported macOS release is recommended when
   installing build tools through Homebrew.
@@ -412,9 +461,12 @@ open ".build/app/Signal Sieve.app"
 ```
 
 Because a clone build is locally ad-hoc signed rather than notarized with an
-Apple Developer ID, macOS may ask you to confirm the first launch. In Finder,
-Control-click **Signal Sieve.app**, choose **Open**, review the macOS notice,
-and choose **Open** again. Do not disable Gatekeeper.
+Apple Developer ID, macOS may ask you to confirm the first launch. First try to
+open the app. On macOS 15 Sequoia and later, go to **System Settings → Privacy
+& Security**, scroll to **Security**, click **Open Anyway**, authenticate, and
+confirm **Open**. The override is offered for approximately one hour after the
+blocked attempt. Do not disable Gatekeeper or remove quarantine attributes
+globally. See [Apple's current instructions](https://support.apple.com/en-lamr/102445).
 
 To keep the app, drag `.build/app/Signal Sieve.app` into your Applications
 folder. Signal Sieve can remain active in the background after its main window
@@ -434,11 +486,29 @@ On its first run, it builds missing pinned PDF dependencies, creates the local
 
 ### Verify the build
 
+Run the complete Swift Testing suite locally before each push:
+
+```sh
+./test-swift-testing-local.sh
+```
+
+This compiles and executes the same `@Test` declarations used by `swift test`
+without invoking the broken SwiftPM build service in some Command Line Tools
+installations. It rebuilds the core automatically when source inputs are newer,
+then reuses a current core build for faster subsequent runs. The harness calls
+Swift Testing's internal `__swiftPMEntryPoint`, the same integration entry point
+generated by SwiftPM. If a future toolchain removes or changes that symbol, the
+harness intentionally fails during compilation instead of reporting a false
+pass. Install a compatible toolchain or update the harness in that case.
+
 For a release-style local verification, run `./quality-gate.sh`. It compiles
-with warnings as errors, runs the local unit/integration suite, packages and
-validates the app, checks shell syntax, verifies private-framework linkage and
-code signing, and enforces static privacy restrictions against adding an
-in-process network client or source/test symlinks.
+with warnings as errors, executes both the Swift Testing and local integration
+suites, packages and validates the app, checks shell syntax, verifies
+private-framework linkage and code signing, and enforces static privacy
+restrictions against adding an in-process network client, an unapproved
+subprocess network tool, a shell bridge, or source/test symlinks. The only
+approved subprocess network paths are the documented fixed numeric loopback
+bridges for optional Ollama and Community Engines actions.
 
 ```sh
 ./quality-gate.sh
@@ -454,8 +524,12 @@ in-process network client or source/test symlinks.
   install the offered update, and retry.
 - **The first dependency build takes time:** qpdf and libjpeg-turbo are compiled
   locally once; later application rebuilds reuse `.build/vendor`.
-- **macOS blocks the first launch:** use Finder's Control-click **Open** flow.
-  Do not remove quarantine attributes globally or disable Gatekeeper.
+- **macOS blocks the first launch:** first attempt to open the app. Then open
+  **System Settings → Privacy & Security**, scroll to **Security**, choose
+  **Open Anyway**, authenticate, and confirm **Open**. The button remains
+  available for approximately one hour after the blocked attempt. Do not
+  remove quarantine attributes globally or disable Gatekeeper. See
+  [Apple's current instructions](https://support.apple.com/en-lamr/102445).
 
 With a complete Xcode installation, you may also use:
 
@@ -464,6 +538,12 @@ swift run SignalSieve
 ```
 
 ## Tests
+
+Run all Swift Testing declarations without SwiftPM:
+
+```sh
+./test-swift-testing-local.sh
+```
 
 Run the complete release-style quality gate:
 

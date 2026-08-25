@@ -1,0 +1,157 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Verify and publish macOS app
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        shell: zsh {0}
+        run: |
+          APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)"
+          EXPECTED_TAG="v${APP_VERSION}"
+          if [[ "${GITHUB_REF_NAME}" != "${EXPECTED_TAG}" ]]; then
+            print -u2 "Tag ${GITHUB_REF_NAME} does not match app version ${APP_VERSION}."
+            print -u2 "Expected tag: ${EXPECTED_TAG}"
+            exit 1
+          fi
+
+      - name: Show Swift toolchain
+        run: swift --version
+
+      - name: Build with warnings as errors
+        run: swift build -Xswiftc -warnings-as-errors -Xswiftc -disable-batch-mode
+
+      - name: Cache pinned PDF dependencies
+        uses: actions/cache@v5
+        with:
+          path: .build/vendor
+          key: pdf-vendor-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bootstrap-pdf-tools.sh') }}
+
+      - name: Build pinned PDF dependencies
+        run: ./bootstrap-pdf-tools.sh
+
+      - name: Build local PDF cleaning helper
+        run: ./build-local.sh
+
+      - name: Run unit and integration tests
+        run: swift test -Xswiftc -disable-batch-mode
+
+      - name: Run release quality gate
+        run: ./quality-gate.sh
+
+      - name: Package verified application
+        id: package
+        shell: zsh {0}
+        run: |
+          APP_BUNDLE=".build/app/Signal Sieve.app"
+          RELEASE_ARCHITECTURE="arm64"
+          EXECUTABLE_ARCHITECTURES="$(lipo -archs "${APP_BUNDLE}/Contents/MacOS/SignalSieve")"
+          if [[ "${EXECUTABLE_ARCHITECTURES}" != "arm64" ]]; then
+            print -u2 "Release must be Apple silicon arm64; found: ${EXECUTABLE_ARCHITECTURES}"
+            exit 1
+          fi
+
+          ARCHIVE_NAME="Signal-Sieve-${GITHUB_REF_NAME}-macOS-${RELEASE_ARCHITECTURE}.zip"
+          ARCHIVE_PATH="dist/${ARCHIVE_NAME}"
+          ARCHIVE_CHECKSUM_PATH="${ARCHIVE_PATH}.sha256"
+          DMG_NAME="Signal-Sieve-${GITHUB_REF_NAME}-macOS-${RELEASE_ARCHITECTURE}.dmg"
+          DMG_PATH="dist/${DMG_NAME}"
+          DMG_CHECKSUM_PATH="${DMG_PATH}.sha256"
+          DMG_ROOT="dist/dmg-root"
+
+          mkdir -p dist "${DMG_ROOT}"
+          ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${ARCHIVE_PATH}"
+          ditto "${APP_BUNDLE}" "${DMG_ROOT}/Signal Sieve.app"
+          ln -s /Applications "${DMG_ROOT}/Applications"
+          hdiutil create \
+            -volname "Signal Sieve" \
+            -srcfolder "${DMG_ROOT}" \
+            -format UDZO \
+            -ov \
+            "${DMG_PATH}"
+          (
+            cd dist
+            shasum -a 256 "${ARCHIVE_NAME}" > "${ARCHIVE_NAME}.sha256"
+            shasum -a 256 "${DMG_NAME}" > "${DMG_NAME}.sha256"
+          )
+
+          print "archive=${ARCHIVE_PATH}" >> "${GITHUB_OUTPUT}"
+          print "archive_checksum=${ARCHIVE_CHECKSUM_PATH}" >> "${GITHUB_OUTPUT}"
+          print "dmg=${DMG_PATH}" >> "${GITHUB_OUTPUT}"
+          print "dmg_checksum=${DMG_CHECKSUM_PATH}" >> "${GITHUB_OUTPUT}"
+
+      - name: Attest release provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.dmg }}
+
+      - name: Prepare honest release notes
+        shell: zsh {0}
+        run: |
+          NOTES_PATH="dist/RELEASE_NOTES.md"
+          print '# Signal Sieve for Apple silicon' > "${NOTES_PATH}"
+          print '' >> "${NOTES_PATH}"
+          print 'This release supports Apple silicon Macs (`arm64`). It is ad-hoc signed but is **not notarized with an Apple Developer ID**.' >> "${NOTES_PATH}"
+          print '' >> "${NOTES_PATH}"
+          print 'After the first blocked launch on macOS 15 Sequoia or later, open **System Settings → Privacy & Security**, scroll to **Security**, choose **Open Anyway**, authenticate, and confirm **Open**. Do not disable Gatekeeper or remove quarantine globally.' >> "${NOTES_PATH}"
+          print '' >> "${NOTES_PATH}"
+          print 'The DMG is the simplest installation. The ZIP contains the same verified app bundle. Each asset has a neighboring SHA-256 checksum.' >> "${NOTES_PATH}"
+          print '' >> "${NOTES_PATH}"
+          print 'Verify a checksum with:' >> "${NOTES_PATH}"
+          print '```sh' >> "${NOTES_PATH}"
+          print 'shasum -a 256 -c Signal-Sieve-*.sha256' >> "${NOTES_PATH}"
+          print '```' >> "${NOTES_PATH}"
+          print '' >> "${NOTES_PATH}"
+          print 'Verify GitHub build provenance with:' >> "${NOTES_PATH}"
+          print '```sh' >> "${NOTES_PATH}"
+          print "gh attestation verify Signal-Sieve-${GITHUB_REF_NAME}-macOS-arm64.dmg -R JACKNINES/SignalSieve" >> "${NOTES_PATH}"
+          print '```' >> "${NOTES_PATH}"
+          print '' >> "${NOTES_PATH}"
+          print 'Signal Sieve works without Ollama or Community Engines. Those optional integrations contact only fixed numeric loopback services after an explicit user action.' >> "${NOTES_PATH}"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ARCHIVE: ${{ steps.package.outputs.archive }}
+          RELEASE_ARCHIVE_CHECKSUM: ${{ steps.package.outputs.archive_checksum }}
+          RELEASE_DMG: ${{ steps.package.outputs.dmg }}
+          RELEASE_DMG_CHECKSUM: ${{ steps.package.outputs.dmg_checksum }}
+        run: |
+          RELEASE_ARGUMENTS=(
+            "${GITHUB_REF_NAME}"
+            "${RELEASE_ARCHIVE}"
+            "${RELEASE_ARCHIVE_CHECKSUM}"
+            "${RELEASE_DMG}"
+            "${RELEASE_DMG_CHECKSUM}"
+            --repo "${GITHUB_REPOSITORY}"
+            --verify-tag
+            --notes-file dist/RELEASE_NOTES.md
+            --title "Signal Sieve ${GITHUB_REF_NAME}"
+          )
+          gh release create "${RELEASE_ARGUMENTS[@]}"

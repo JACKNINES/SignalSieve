@@ -107,9 +107,10 @@ Relational detectors additionally require a natural-text negative fixture, a
 decodable positive fixture where applicable, and a post-cleaning assertion that
 the supported carrier no longer survives.
 
-The release quality gate type-checks the Swift Testing suite with warnings as
-errors and runs a compiler-compatible local suite that includes these Unicode
-boundaries. A new range is not considered supported until both paths pass.
+The release quality gate compiles and executes the Swift Testing suite with
+warnings as errors, then runs the independent local integration suite that
+also includes these Unicode boundaries. A new range is not considered
+supported until both paths pass.
 
 ## Limitations
 

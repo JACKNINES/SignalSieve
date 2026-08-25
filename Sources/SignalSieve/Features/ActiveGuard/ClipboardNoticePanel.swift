@@ -462,11 +462,20 @@ private struct ClipboardNoticeView: View {
                     label: "Automatically use Strict Clean for copied text",
                     help: "Eligible future text copies are Strict Cleaned. Emoji and some writing systems may change. Alert visibility is controlled separately."
                 )
-                Text(localized("Safe Clean and Strict Clean are mutually exclusive. Alert visibility is a separate setting."))
+                protocolToggle(
+                    .visualTransfer,
+                    label: "Automatically use Visual Transfer (OCR) for copied text",
+                    help: "Eligible future text copies are rendered and read with local OCR. OCR may change visible text, so review the result."
+                )
+                Text(localized("Safe Clean, Strict Clean, and Automatic Visual Transfer are mutually exclusive. Alert visibility is a separate setting."))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(localized("Automatic text cleaning skips source code, files, images, and privacy-sensitive clipboard types."))
+                Text(localized("Automatic processing skips source code, files, images, privacy-sensitive clipboard types, and oversized OCR input."))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(localized("Automatic Visual Transfer uses local OCR and may change words or punctuation. It refuses to overwrite detected changes to URLs, numbers, or quotations."))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

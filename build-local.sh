@@ -72,6 +72,7 @@ swiftc \
     "$PROJECT_ROOT/Sources/SignalSieveCore/BoundedZIPRewriter.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/ClipboardProtectionAnalyzer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/ClipboardAutomationProtocol.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/ClipboardPlainTextWriter.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/ClipboardTypeInventory.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/ClipboardHistory.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/ClipboardImageImporter.swift" \
@@ -88,6 +89,7 @@ swiftc \
     "$PROJECT_ROOT/Sources/SignalSieveCore/FileProvenanceAnalyzer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/FindingReportFormatter.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/HiddenTextAnalyzer.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/InputResultAutomation.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/InvisibleFragmentRevealer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/LocalRewriteEngine.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/LinkSanitizationModels.swift" \

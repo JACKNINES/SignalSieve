@@ -35,6 +35,38 @@ fi
 COMPATIBLE_SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk"
 TARGET_ARCH="$(uname -m)"
 
+require_command_output() {
+    local expected="$1"
+    local failure_message="$2"
+    shift 2
+
+    local command_output
+    if ! command_output="$("$@")"; then
+        print -u2 "Inspection command failed: $failure_message"
+        return 1
+    fi
+    if [[ "$command_output" != *"$expected"* ]]; then
+        print -u2 "$failure_message"
+        return 1
+    fi
+}
+
+reject_command_output() {
+    local rejected="$1"
+    local failure_message="$2"
+    shift 2
+
+    local command_output
+    if ! command_output="$("$@")"; then
+        print -u2 "Inspection command failed: $failure_message"
+        return 1
+    fi
+    if [[ "$command_output" == *"$rejected"* ]]; then
+        print -u2 "$failure_message"
+        return 1
+    fi
+}
+
 if [[ -d "$COMPATIBLE_SDK" ]]; then
     SDK_PATH="$COMPATIBLE_SDK"
 else
@@ -63,15 +95,15 @@ done
 plutil -lint "$APP_BUNDLE/Contents/Info.plist"
 codesign --verify --deep --strict "$APP_BUNDLE"
 
-if ! otool -L "$EXECUTABLE" | grep -F '@rpath/libSignalSieveCore.dylib'; then
-    print -u2 "Packaged executable does not use the expected private framework path."
-    exit 1
-fi
+require_command_output \
+    '@rpath/libSignalSieveCore.dylib' \
+    'Packaged executable does not use the expected private framework path.' \
+    otool -L "$EXECUTABLE"
 
-if ! otool -l "$EXECUTABLE" | grep -F '@executable_path/../Frameworks'; then
-    print -u2 "Packaged executable is missing its private Frameworks rpath."
-    exit 1
-fi
+require_command_output \
+    '@executable_path/../Frameworks' \
+    'Packaged executable is missing its private Frameworks rpath.' \
+    otool -l "$EXECUTABLE"
 
 if [[ ! -x "$EXECUTABLE" \
     || ! -r "$FRAMEWORK" \
@@ -91,10 +123,12 @@ if [[ ! -x "$EXECUTABLE" \
 fi
 
 for theme_icon in "$THEME_ICON_DARK" "$THEME_ICON_LIGHT" "$THEME_ICON_PINK"; do
-    if ! sips -g pixelWidth -g pixelHeight "$theme_icon" \
-            | grep -F 'pixelWidth: 1024' >/dev/null \
-        || ! sips -g pixelWidth -g pixelHeight "$theme_icon" \
-            | grep -F 'pixelHeight: 1024' >/dev/null; then
+    if ! THEME_ICON_METADATA="$(sips -g pixelWidth -g pixelHeight "$theme_icon")"; then
+        print -u2 "Unable to inspect packaged theme icon: $theme_icon"
+        exit 1
+    fi
+    if [[ "$THEME_ICON_METADATA" != *'pixelWidth: 1024'* \
+        || "$THEME_ICON_METADATA" != *'pixelHeight: 1024'* ]]; then
         print -u2 "Packaged theme icon is not 1024 by 1024: $theme_icon"
         exit 1
     fi
@@ -106,42 +140,90 @@ if ! grep -F 'Mozilla Public License Version 2.0' "$PROJECT_LICENSE" \
     exit 1
 fi
 
-if otool -L "$PDF_SANITIZER" | grep -F '/opt/homebrew'; then
-    print -u2 "Bundled PDF sanitizer has an unexpected Homebrew runtime dependency."
-    exit 1
-fi
-if ! vtool -show-build "$PDF_SANITIZER" | grep -F 'minos 13.0'; then
-    print -u2 "Bundled PDF sanitizer does not preserve the macOS 13 deployment target."
-    exit 1
-fi
+reject_command_output \
+    '/opt/homebrew' \
+    'Bundled PDF sanitizer has an unexpected Homebrew runtime dependency.' \
+    otool -L "$PDF_SANITIZER"
+require_command_output \
+    'minos 13.0' \
+    'Bundled PDF sanitizer does not preserve the macOS 13 deployment target.' \
+    vtool -show-build "$PDF_SANITIZER"
 
-if ! otool -L "$PIXEL_MODULE" | grep -F '@rpath/libSignalSieveCore.dylib'; then
-    print -u2 "Bundled pixel baseline does not use the private core framework."
-    exit 1
-fi
+require_command_output \
+    '@rpath/libSignalSieveCore.dylib' \
+    'Bundled pixel baseline does not use the private core framework.' \
+    otool -L "$PIXEL_MODULE"
 
-if ! otool -l "$PIXEL_MODULE" | grep -F '@executable_path/../../../Frameworks'; then
-    print -u2 "Bundled pixel baseline is missing its packaged Frameworks rpath."
-    exit 1
-fi
+require_command_output \
+    '@executable_path/../../../Frameworks' \
+    'Bundled pixel baseline is missing its packaged Frameworks rpath.' \
+    otool -l "$PIXEL_MODULE"
 
-if ! otool -L "$SPECTRAL_MODULE" | grep -F '@rpath/libSignalSieveCore.dylib'; then
-    print -u2 "Bundled spectral pixel module does not use the private core framework."
-    exit 1
-fi
+require_command_output \
+    '@rpath/libSignalSieveCore.dylib' \
+    'Bundled spectral pixel module does not use the private core framework.' \
+    otool -L "$SPECTRAL_MODULE"
 
-if ! otool -l "$SPECTRAL_MODULE" | grep -F '@executable_path/../../../Frameworks'; then
-    print -u2 "Bundled spectral pixel module is missing its packaged Frameworks rpath."
-    exit 1
-fi
+require_command_output \
+    '@executable_path/../../../Frameworks' \
+    'Bundled spectral pixel module is missing its packaged Frameworks rpath.' \
+    otool -l "$SPECTRAL_MODULE"
 
 if grep -rnE 'URLSession|NWConnection|NWBrowser|import Network|WKWebView' \
         "$PROJECT_ROOT/Sources"; then
     print -u2 "Unexpected in-process network client found in privacy-sensitive sources."
     exit 1
+else
+    NETWORK_SCAN_STATUS=$?
+    if (( NETWORK_SCAN_STATUS != 1 )); then
+        print -u2 "Unable to scan privacy-sensitive sources for network clients."
+        exit 1
+    fi
 fi
 
-if find "$PROJECT_ROOT/Sources" "$PROJECT_ROOT/Tests" -type l | grep '.'; then
+# Subprocess networking is also a privacy boundary. Only the two documented,
+# fixed-path curl bridges may exist, and both must remain pinned to numeric
+# loopback literals. Any new network-capable executable or shell bridge fails
+# closed until it is reviewed and explicitly allowlisted here.
+NETWORK_TOOL_PATTERN='/((usr/bin)|(usr/local/bin)|(opt/homebrew/bin))/(curl|wget|nc|ncat|socat|ftp|telnet)'
+if ! NETWORK_TOOL_MATCHES="$(grep -rnE "$NETWORK_TOOL_PATTERN" "$PROJECT_ROOT/Sources")"; then
+    print -u2 "Expected documented loopback curl bridges were not found."
+    exit 1
+fi
+NETWORK_TOOL_MATCH_COUNT="$(print -r -- "$NETWORK_TOOL_MATCHES" | grep -c '.')"
+if [[ "$NETWORK_TOOL_MATCH_COUNT" != "2" ]] \
+    || [[ "$NETWORK_TOOL_MATCHES" != *'Sources/SignalSieveCore/LocalRewriteEngine.swift'* ]] \
+    || [[ "$NETWORK_TOOL_MATCHES" != *'Sources/SignalSieveCore/CommunityWatermarkService.swift'* ]]; then
+    print -r -- "$NETWORK_TOOL_MATCHES"
+    print -u2 "Unexpected subprocess network tool found in privacy-sensitive sources."
+    exit 1
+fi
+if ! grep -F 'http://127.0.0.1:11434/api/chat' \
+        "$PROJECT_ROOT/Sources/SignalSieveCore/LocalRewriteEngine.swift" >/dev/null \
+    || ! grep -F 'http://127.0.0.1:8765' \
+        "$PROJECT_ROOT/Sources/SignalSieveCore/CommunityWatermarkService.swift" >/dev/null; then
+    print -u2 "Approved subprocess network bridges are no longer pinned to numeric loopback."
+    exit 1
+fi
+if grep -rnE 'fileURLWithPath: "/bin/(sh|bash|zsh)"' "$PROJECT_ROOT/Sources"; then
+    print -u2 "Shell subprocesses are not allowed in privacy-sensitive sources."
+    exit 1
+else
+    SHELL_SCAN_STATUS=$?
+    if (( SHELL_SCAN_STATUS != 1 )); then
+        print -u2 "Unable to scan privacy-sensitive sources for shell subprocesses."
+        exit 1
+    fi
+fi
+
+if ! SOURCE_SYMLINK="$(
+    find "$PROJECT_ROOT/Sources" "$PROJECT_ROOT/Tests" -type l -print -quit
+)"; then
+    print -u2 "Unable to scan sources and tests for symbolic links."
+    exit 1
+fi
+if [[ -n "$SOURCE_SYMLINK" ]]; then
+    print -r -- "$SOURCE_SYMLINK"
     print -u2 "Source or test symlinks are not allowed by the quality gate."
     exit 1
 fi
