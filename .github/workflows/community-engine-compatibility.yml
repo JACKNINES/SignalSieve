@@ -1,0 +1,141 @@
+name: Community Engine Compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      watermarks_remover_ref:
+        description: "Full watermarks-remover commit SHA to verify"
+        required: true
+        default: "4a0fbc312f2e5138c35d270d9db284cc07689930"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: community-engine-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    name: Verify watermarks-remover compatibility
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      UPSTREAM_REF: ${{ inputs.watermarks_remover_ref }}
+      UPSTREAM_ROOT: .community-engine/watermarks-remover
+
+    steps:
+      - name: Check out Signal Sieve
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Validate pinned upstream revision
+        shell: zsh {0}
+        run: |
+          if [[ ! "${UPSTREAM_REF}" =~ ^[0-9a-f]{40}$ ]]; then
+            print -u2 "watermarks_remover_ref must be a full lowercase commit SHA."
+            exit 1
+          fi
+
+      - name: Check out pinned watermarks-remover source
+        uses: actions/checkout@v5
+        with:
+          repository: guillaumemeyer/watermarks-remover
+          ref: ${{ inputs.watermarks_remover_ref }}
+          path: .community-engine/watermarks-remover
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify checked-out upstream revision
+        shell: zsh {0}
+        run: |
+          ACTUAL_REF="$(git -C "${UPSTREAM_ROOT}" rev-parse HEAD)"
+          if [[ "${ACTUAL_REF}" != "${UPSTREAM_REF}" ]]; then
+            print -u2 "Expected ${UPSTREAM_REF}; checked out ${ACTUAL_REF}."
+            exit 1
+          fi
+
+      - name: Set up upstream Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: .community-engine/watermarks-remover/requirements-dev.txt
+
+      - name: Install pinned upstream test dependencies
+        run: python -m pip install --disable-pip-version-check -r "${UPSTREAM_ROOT}/requirements-dev.txt"
+
+      - name: Run upstream test suite
+        working-directory: .community-engine/watermarks-remover
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -m pytest -ra
+
+      - name: Cache Signal Sieve PDF dependencies
+        uses: actions/cache@v5
+        with:
+          path: .build/vendor
+          key: pdf-vendor-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bootstrap-pdf-tools.sh') }}
+
+      - name: Build pinned Signal Sieve PDF dependencies
+        run: ./bootstrap-pdf-tools.sh
+
+      - name: Run live compatibility smoke test
+        shell: zsh {0}
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          WATERMARKS_SERVER_VERSION: ${{ inputs.watermarks_remover_ref }}
+          SERVICE_LOG: ${{ runner.temp }}/watermarks-remover-service.log
+        run: |
+          python "${UPSTREAM_ROOT}/service/scripts/server.py" \
+            --host 127.0.0.1 \
+            --port 8765 >"${SERVICE_LOG}" 2>&1 &
+          SERVICE_PID=$!
+
+          stop_service() {
+            kill "${SERVICE_PID}" 2>/dev/null || true
+            wait "${SERVICE_PID}" 2>/dev/null || true
+          }
+          trap stop_service EXIT
+
+          SERVICE_READY=false
+          for attempt in {1..30}; do
+            if /usr/bin/curl --fail --silent --show-error \
+                --max-time 2 --noproxy '*' \
+                http://127.0.0.1:8765/health >/dev/null; then
+              SERVICE_READY=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "${SERVICE_READY}" != "true" ]]; then
+            print -u2 "watermarks-remover did not become healthy on loopback."
+            tail -n 200 "${SERVICE_LOG}" >&2 || true
+            exit 1
+          fi
+
+          ./community-engine-smoke-test.sh
+
+      - name: Upload community-engine service log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: watermarks-remover-service-log
+          path: ${{ runner.temp }}/watermarks-remover-service.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Write compatibility summary
+        if: success()
+        shell: zsh {0}
+        run: |
+          {
+            print '## Community Engine compatibility passed'
+            print ''
+            print "- Signal Sieve commit: ${GITHUB_SHA}"
+            print "- watermarks-remover commit: ${UPSTREAM_REF}"
+            print '- Upstream tests: passed (optional dependency skips may apply)'
+            print '- Live health, capabilities, inspect, clean, and native residual analysis: passed'
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -69,6 +69,19 @@ The smoke test exercises health, capabilities, inspect, clean, and Signal
 Sieve's native residual-risk analysis. It fails closed and never uses clipboard
 contents.
 
+### Manual GitHub compatibility run
+
+Maintainers can open **Actions → Community Engine Compatibility → Run
+workflow** to verify a reviewed upstream commit without making it a dependency
+of every push or release. The input must be the full lowercase commit SHA from
+`guillaumemeyer/watermarks-remover`; the checked-out revision is verified before
+any upstream code runs.
+
+The manual job runs the upstream test suite, starts its stdlib service only on
+`127.0.0.1:8765`, and runs Signal Sieve's health, capabilities, inspect, clean,
+adversarial-Unicode, and residual-risk checks. It uploads the bounded service
+log for seven days and receives only read access to this repository.
+
 ## Privacy and trust boundary
 
 - The endpoint is compiled as the numeric loopback address
