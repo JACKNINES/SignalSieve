@@ -20,9 +20,12 @@ Signal Sieve application.
 
 ## Current fixtures
 
-- `signal-sieve-mark.png`: the white Signal Sieve mark on a transparent
-  1,024-by-1,024 canvas, used as the README brand image without an app-icon
-  tile or screenshot background.
+- `signal-sieve-mark.png`: the black Signal Sieve mark on a transparent
+  1,024-by-1,024 canvas with a white diagonal sieve lattice. The lattice blends
+  into light README backgrounds and becomes visible on dark backgrounds. A
+  narrow white keyline preserves the black mark's silhouette in dark mode. It
+  is generated from the official dark theme icon by
+  `Design/READMEAssets/generate-readme-mark.swift`.
 - `signal-sieve-overview.png`: neutral project note containing U+200B and
   U+202E plus a reserved-domain URL.
 - `signal-sieve-active-guard.png`: persistent high-risk Unicode alert after
