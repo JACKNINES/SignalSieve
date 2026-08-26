@@ -21,9 +21,9 @@ Signal Sieve application.
 ## Current fixtures
 
 - `signal-sieve-mark.png`: the black Signal Sieve mark on a transparent
-  1,024-by-1,024 canvas with a white diagonal sieve lattice. The lattice blends
-  into light README backgrounds and becomes visible on dark backgrounds. A
-  narrow white keyline preserves the black mark's silhouette in dark mode. It
+  1,024-by-1,024 canvas. A narrow white keyline disappears into light README
+  backgrounds and preserves the black mark's silhouette in dark mode without
+  adding a separate background treatment. It
   is generated from the official dark theme icon by
   `Design/READMEAssets/generate-readme-mark.swift`.
 - `signal-sieve-overview.png`: neutral project note containing U+200B and

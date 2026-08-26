@@ -1,7 +1,7 @@
 # Signal Sieve
 
 <p align="center">
-  <img src="docs/images/signal-sieve-mark.png" width="180" alt="Signal Sieve lightning and SS mark">
+  <img src="docs/images/signal-sieve-mark.png" width="180" alt="Signal Sieve black lightning and SS mark with an adaptive white keyline">
 </p>
 
 <p align="center"><strong>Inspect what copied text and files carry before you share them.</strong></p>

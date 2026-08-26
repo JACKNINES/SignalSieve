@@ -7,43 +7,8 @@ import ImageIO
 private let canvasSize = 1_024
 private let bytesPerPixel = 4
 private let bytesPerRow = canvasSize * bytesPerPixel
-private let latticeSpacing = 180
-private let latticeHalfWidth = 2
-private let outlineRadius = 7
-
-private func positiveModulo(_ value: Int, _ divisor: Int) -> Int {
-    let remainder = value % divisor
-    return remainder >= 0 ? remainder : remainder + divisor
-}
-
-private func isNearLatticeLine(_ value: Int) -> Bool {
-    let remainder = positiveModulo(value, latticeSpacing)
-    return min(remainder, latticeSpacing - remainder) <= latticeHalfWidth
-}
-
-private func isInsideRoundedSquare(
-    x: Int,
-    y: Int,
-    inset: Int,
-    radius: Int
-) -> Bool {
-    let minimum = inset
-    let maximum = canvasSize - 1 - inset
-    guard x >= minimum, x <= maximum, y >= minimum, y <= maximum else {
-        return false
-    }
-
-    if x >= minimum + radius, x <= maximum - radius
-        || y >= minimum + radius, y <= maximum - radius {
-        return true
-    }
-
-    let centerX = x < minimum + radius ? minimum + radius : maximum - radius
-    let centerY = y < minimum + radius ? minimum + radius : maximum - radius
-    let deltaX = x - centerX
-    let deltaY = y - centerY
-    return deltaX * deltaX + deltaY * deltaY <= radius * radius
-}
+private let outlineRadius = 5
+private let outlineAlpha: UInt8 = 235
 
 private func loadRGBA(from url: URL) throws -> [UInt8] {
     let data = try Data(contentsOf: url)
@@ -191,23 +156,9 @@ let mark = logoMask(from: sourcePixels)
 let outline = dilateSquare(mark, radius: outlineRadius)
 var output = [UInt8](repeating: 0, count: canvasSize * bytesPerRow)
 
-for y in 0..<canvasSize {
-    for x in 0..<canvasSize {
-        let pixelIndex = y * canvasSize + x
-        let insideOuter = isInsideRoundedSquare(x: x, y: y, inset: 54, radius: 128)
-        guard insideOuter else { continue }
-
-        let insideInner = isInsideRoundedSquare(x: x, y: y, inset: 62, radius: 120)
-        let isBorder = !insideInner
-        let isLattice = isNearLatticeLine(x + y) || isNearLatticeLine(x - y)
-        if isBorder || isLattice {
-            putWhite(alpha: 255, at: pixelIndex, into: &output)
-        }
-    }
-}
-
 for pixelIndex in 0..<mark.count where outline[pixelIndex] > 0 {
-    putWhite(alpha: outline[pixelIndex], at: pixelIndex, into: &output)
+    let alpha = UInt8(Int(outline[pixelIndex]) * Int(outlineAlpha) / 255)
+    putWhite(alpha: alpha, at: pixelIndex, into: &output)
 }
 for pixelIndex in 0..<mark.count where mark[pixelIndex] > 0 {
     putBlack(alpha: mark[pixelIndex], at: pixelIndex, into: &output)
