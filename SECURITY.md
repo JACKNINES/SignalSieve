@@ -21,6 +21,9 @@ public issue. Provide the smallest synthetic reproduction possible.
   entries and 20,000 characters per entry; concealed, transient, and
   auto-generated pasteboard items are not stored. Source application names are
   best-effort observations of the foreground app, not authenticated provenance.
+  Clean-result and original-restore actions are available only for history-
+  eligible, untruncated automatic-cleaning entries, and they fail closed if the
+  pasteboard change count or expected text no longer matches.
 - Opening a finding in the browser is an explicit network boundary. Unicode
   queries contain element metadata only; Surface Regularity queries contain only
   the generic signal topic. Neither may contain the analyzed text.
@@ -31,6 +34,16 @@ public issue. Provide the smallest synthetic reproduction possible.
 - Code Guard never executes, compiles, or automatically rewrites copied code.
   Sanitized output requires explicit review, and visually confusable
   identifiers remain unchanged because their intended spelling is unknowable.
+- Automatic clipboard cleaning prepares and reanalyzes its candidate before
+  writing. If a high-risk finding remains, the pasteboard is left unchanged and
+  the item is treated as quarantined. If an original red finding is removed, the
+  clean text may replace the clipboard, but the red source warning remains
+  mandatory. Clean Receipts store only counts, severities, the selected
+  protocol, skipped status, and bounded content-free reasons.
+  A green receipt is limited to the supported cleaning analysis and is not a
+  general safety or source-trust verdict. Automatic Visual Transfer follows the
+  same reanalysis and quarantine decision, but its OCR output remains lossy and
+  is not represented as a deterministic scalar-replacement count.
 - Binary Guard never decodes or executes a detected payload. Encoded data is
   not inherently unsafe; the label describes its representation, not intent.
 - Contextual Unicode classification is fail-safe rather than blanket removal.

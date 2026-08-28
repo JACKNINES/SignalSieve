@@ -63,6 +63,8 @@ struct ContentView: View {
                 entries: model.clipboardHistory,
                 language: model.language,
                 onOpen: model.openClipboardHistoryEntry,
+                onCopyCleanResult: model.copyCleanResultFromHistory,
+                onRestoreOriginal: model.restoreOriginalFromHistory,
                 onDelete: model.removeClipboardHistoryEntry,
                 onClear: model.clearClipboardHistory
             )

@@ -17,6 +17,8 @@ public struct ClipboardHistoryEntry: Identifiable, Sendable, Equatable {
     public let scamThreatLevel: ScamThreatLevel?
     public let wasAutomaticallyCleaned: Bool
     public let automaticCleaningAudit: ClipboardAutomaticCleaningAudit?
+    public let cleanedText: String?
+    public let cleanedPasteboardChangeCount: Int?
 
     public init(
         id: UUID = UUID(),
@@ -33,7 +35,9 @@ public struct ClipboardHistoryEntry: Identifiable, Sendable, Equatable {
         scamSignalCount: Int = 0,
         scamThreatLevel: ScamThreatLevel? = nil,
         wasAutomaticallyCleaned: Bool,
-        automaticCleaningAudit: ClipboardAutomaticCleaningAudit? = nil
+        automaticCleaningAudit: ClipboardAutomaticCleaningAudit? = nil,
+        cleanedText: String? = nil,
+        cleanedPasteboardChangeCount: Int? = nil
     ) {
         self.id = id
         self.capturedAt = capturedAt
@@ -50,6 +54,8 @@ public struct ClipboardHistoryEntry: Identifiable, Sendable, Equatable {
         self.scamThreatLevel = scamThreatLevel
         self.wasAutomaticallyCleaned = wasAutomaticallyCleaned
         self.automaticCleaningAudit = automaticCleaningAudit
+        self.cleanedText = cleanedText
+        self.cleanedPasteboardChangeCount = cleanedPasteboardChangeCount
     }
 
     public var visiblePreview: String {
@@ -83,10 +89,18 @@ public enum ClipboardHistory {
         scamSignalCount: Int = 0,
         scamThreatLevel: ScamThreatLevel? = nil,
         wasAutomaticallyCleaned: Bool,
-        automaticCleaningAudit: ClipboardAutomaticCleaningAudit? = nil
+        automaticCleaningAudit: ClipboardAutomaticCleaningAudit? = nil,
+        cleanedText: String? = nil,
+        cleanedPasteboardChangeCount: Int? = nil
     ) -> ClipboardHistoryEntry {
         let characterCount = text.count
         let stored = String(text.prefix(maximumStoredCharacters))
+        let storedCleanedText: String?
+        if let cleanedText, cleanedText.count <= maximumStoredCharacters {
+            storedCleanedText = cleanedText
+        } else {
+            storedCleanedText = nil
+        }
         return ClipboardHistoryEntry(
             capturedAt: capturedAt,
             sourceApplicationName: sourceApplicationName,
@@ -101,7 +115,11 @@ public enum ClipboardHistory {
             scamSignalCount: scamSignalCount,
             scamThreatLevel: scamThreatLevel,
             wasAutomaticallyCleaned: wasAutomaticallyCleaned,
-            automaticCleaningAudit: automaticCleaningAudit
+            automaticCleaningAudit: automaticCleaningAudit,
+            cleanedText: storedCleanedText,
+            cleanedPasteboardChangeCount: storedCleanedText == nil
+                ? nil
+                : cleanedPasteboardChangeCount
         )
     }
 

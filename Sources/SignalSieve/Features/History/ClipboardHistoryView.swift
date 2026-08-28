@@ -7,6 +7,8 @@ struct ClipboardHistoryView: View {
     let entries: [ClipboardHistoryEntry]
     let language: AppLanguage
     let onOpen: (ClipboardHistoryEntry) -> Void
+    let onCopyCleanResult: (ClipboardHistoryEntry) -> Void
+    let onRestoreOriginal: (ClipboardHistoryEntry) -> Void
     let onDelete: (ClipboardHistoryEntry) -> Void
     let onClear: () -> Void
 
@@ -125,6 +127,9 @@ struct ClipboardHistoryView: View {
                audit.originalAlertCount > 0 {
                 automaticCleaningSummary(audit)
             }
+            if let audit = entry.automaticCleaningAudit {
+                cleanReceiptSummary(audit.receipt)
+            }
 
             HStack {
                 Text(formatted("%d characters", entry.originalCharacterCount))
@@ -136,6 +141,17 @@ struct ClipboardHistoryView: View {
                         .foregroundStyle(.orange)
                 }
                 Spacer()
+                if entry.cleanedText != nil {
+                    Button(localized("Copy Clean Result")) {
+                        onCopyCleanResult(entry)
+                    }
+                    .help(localized("Copies the cleaned text only if the clipboard still matches this history item."))
+                    Button(localized("Restore Original")) {
+                        onRestoreOriginal(entry)
+                    }
+                    .disabled(entry.isTruncated)
+                    .help(localized("Restores the original text only if the clipboard still holds the clean result."))
+                }
                 Button(localized("Open in Signal Sieve"), systemImage: "arrow.up.left.and.arrow.down.right") {
                     onOpen(entry)
                     dismiss()
@@ -187,7 +203,7 @@ struct ClipboardHistoryView: View {
     private func automaticCleaningBadge(
         _ audit: ClipboardAutomaticCleaningAudit
     ) -> some View {
-        let mode = localized(audit.mode == .safe ? "Safe Clean" : "Strict Clean")
+        let mode = protocolName(audit.selectedProtocol)
         switch audit.outcome {
         case .cleanedAllDetectedAlerts:
             badge(formatted("%@ · alerts cleaned successfully", mode), color: .green)
@@ -196,7 +212,10 @@ struct ClipboardHistoryView: View {
         case .alertsRemain:
             badge(formatted("%@ · alerts remain", mode), color: .red)
         case .skipped:
-            badge(formatted("%@ · cleaning skipped", mode), color: .red)
+            badge(
+                formatted("%@ · cleaning skipped", mode),
+                color: audit.redRiskRemains ? .red : .orange
+            )
         case .noDetectedAlerts:
             EmptyView()
         }
@@ -205,7 +224,7 @@ struct ClipboardHistoryView: View {
     private func automaticCleaningSummary(
         _ audit: ClipboardAutomaticCleaningAudit
     ) -> some View {
-        let mode = localized(audit.mode == .safe ? "Safe Clean" : "Strict Clean")
+        let mode = protocolName(audit.selectedProtocol)
         let successful = audit.outcome == .cleanedAllDetectedAlerts
         let text = successful
             ? formatted(
@@ -226,6 +245,69 @@ struct ClipboardHistoryView: View {
         )
         .font(.caption)
         .foregroundStyle(color)
+    }
+
+    private func cleanReceiptSummary(
+        _ receipt: ClipboardCleanReceipt
+    ) -> some View {
+        let color: Color
+        let title: String
+        switch receipt.verdict {
+        case .noSupportedRiskRemains:
+            color = .green
+            title = localized("Clean Receipt: no supported cleaning risks remain")
+        case .cleanedSourceNeedsReview:
+            color = .orange
+            title = localized("Clean Receipt: cleaned, but review the source")
+        case .riskRemainsDoNotShare:
+            color = .red
+            title = localized("Clean Receipt: risk remains — do not share")
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            Label(title, systemImage: "checklist")
+                .font(.caption.weight(.semibold))
+            Text(formatted(
+                "Protocol: %@",
+                protocolName(receipt.selectedProtocol)
+            ))
+            Text(formatted(
+                "Original alerts: %d · highest severity: %@",
+                receipt.originalAlertCount,
+                priorityName(receipt.originalPriority)
+            ))
+            Text(formatted(
+                "Remaining alerts: %d · highest severity: %@",
+                receipt.remainingAlertCount,
+                priorityName(receipt.remainingPriority)
+            ))
+        }
+        .font(.caption)
+        .foregroundStyle(color)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func protocolName(_ selection: ClipboardAutomationProtocol) -> String {
+        switch selection {
+        case .reviewAll:
+            localized("Review all enabled warnings")
+        case .safeClean:
+            localized("Safe Clean")
+        case .strictClean:
+            localized("Strict Clean")
+        case .visualTransfer:
+            localized("Visual Transfer")
+        }
+    }
+
+    private func priorityName(_ priority: ClipboardAlertPriority) -> String {
+        switch priority {
+        case .standard:
+            localized("standard")
+        case .elevated:
+            localized("elevated")
+        case .high:
+            localized("high")
+        }
     }
 
     private func dateText(_ date: Date) -> String {

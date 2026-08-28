@@ -157,7 +157,12 @@ they contain no real account, organization, or third-party message data.
 - **Session Copy History:** keeps up to 50 recent text copies in local memory
   while Active Guard is running. Each entry shows its exact capture time,
   probable source application, a bounded visible preview, character count, and
-  detected risks. The source is inferred from the active application; macOS
+  detected risks. Automatic text-cleaning entries also show a Clean Receipt and,
+  only when the original was eligible for history and not truncated, guarded
+  **Copy Clean Result** and **Restore Original** actions. Those actions first
+  confirm that the pasteboard still holds the matching clean result; concealed,
+  transient, auto-generated, and privacy-sensitive items are never retained for
+  restoration. The source is inferred from the active application; macOS
   does not provide a trustworthy browser tab or page URL. Concealed,
   transient, and auto-generated pasteboard entries are not retained, long
   entries are truncated, and all history disappears when Signal Sieve exits.
@@ -192,7 +197,19 @@ they contain no real account, organization, or third-party message data.
   limits input to 4,000 characters, and refuses to overwrite detected changes
   to URLs, numbers, or quotations. Automatic processing skips source code,
   files, images, and privacy-sensitive clipboard types. Deterministic cleaning
-  reanalyzes the result before reporting whether alerts were removed or remain.
+  prepares and reanalyzes the candidate before replacing the clipboard. If a
+  high-risk finding remains after reanalysis, Signal Sieve leaves the clipboard
+  unchanged and marks the copy as quarantined. A red finding that was
+  successfully removed may be replaced, but the red source warning still
+  appears. The Clean Receipt reports the selected protocol, original and
+  remaining alert counts and highest severity, deterministic removed/replaced
+  counts, skipped status, and a short content-free reason with progressively
+  disclosed technical evidence.
+  A green receipt means only that Signal Sieve found no remaining risk covered
+  by this cleaning analysis; it is not a malware verdict, authorship proof, or
+  guarantee that the source is trustworthy. Visual Transfer uses the same
+  receipt and quarantine decision, while its OCR transformation is identified
+  separately from deterministic removed/replaced counts.
   Alert visibility is a separate setting: users may hide
   green and yellow alerts, or hide green through orange alerts. The two
   visibility choices are mutually exclusive, and red alerts cannot be disabled.

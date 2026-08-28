@@ -16,6 +16,19 @@ private struct ClipboardCoreAnalysis: Sendable {
     let finalLinkCleaning: URLCleaningResult
 }
 
+private struct AutomaticVisualTransferContext {
+    let originalText: String
+    let ocrSourceText: String
+    let expectedChangeCount: Int
+    let capturedAt: Date
+    let sourceApplicationName: String?
+    let sourceBundleIdentifier: String?
+    let shouldStoreInHistory: Bool
+    let typeInventory: ClipboardTypeInventory
+    let fileMetadataAlert: Bool
+    let prepared: ClipboardCoreAnalysis
+}
+
 /// Serializes CPU-heavy clipboard work away from AppKit's main actor. Pending
 /// cancelled requests are discarded before they allocate analysis state, so a
 /// burst of copy events cannot create an unbounded detached-task storm.
@@ -696,6 +709,42 @@ final class SignalSieveViewModel: ObservableObject {
             : localized("Opened a copy from session history.")
     }
 
+    func copyCleanResultFromHistory(_ entry: ClipboardHistoryEntry) {
+        guard let cleanedText = entry.cleanedText,
+              let expectedChangeCount = entry.cleanedPasteboardChangeCount else {
+            status = localized("No clean result is available for this copy.")
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        let expected = ClipboardPlainTextSnapshot(
+            changeCount: expectedChangeCount,
+            text: cleanedText
+        )
+        guard ClipboardPlainTextWriter.matches(expected, on: pasteboard) else {
+            status = localized("The clipboard changed after the receipt, so SignalSieve did not copy the clean result.")
+            return
+        }
+        status = localized("The clean result is already on the clipboard.")
+    }
+
+    func restoreOriginalFromHistory(_ entry: ClipboardHistoryEntry) {
+        guard !entry.isTruncated,
+              let cleanedText = entry.cleanedText,
+              let expectedChangeCount = entry.cleanedPasteboardChangeCount else {
+            status = localized("The original is not restorable for this copy.")
+            return
+        }
+        guard replaceClipboard(
+            expectedChangeCount: expectedChangeCount,
+            expectedText: cleanedText,
+            replacement: entry.text
+        ) else {
+            status = localized("The clipboard changed after the receipt, so SignalSieve did not restore the original.")
+            return
+        }
+        status = localized("Restored the original text from session history.")
+    }
+
     func removeClipboardHistoryEntry(_ entry: ClipboardHistoryEntry) {
         clipboardHistory.removeAll { $0.id == entry.id }
         status = localized("Removed one entry from session copy history.")
@@ -839,7 +888,9 @@ final class SignalSieveViewModel: ObservableObject {
                 ),
                 clipboardContentKinds: typeInventory.kinds,
                 pasteboardChangeCount: pasteboard.changeCount,
-                automaticCleaningAudit: nil
+                automaticCleaningAudit: nil,
+                cleanedClipboardText: nil,
+                canRestoreOriginal: false
             )
             if ClipboardAlertVisibilityPolicy.shouldPresent(
                 notice.priority,
@@ -904,24 +955,89 @@ final class SignalSieveViewModel: ObservableObject {
         let copiedCodeAnalysis = prepared.copiedCodeAnalysis
         let initialLinkCleaning = prepared.initialLinkCleaning
         var effectiveText = prepared.effectiveText
-        let hasNonTextRepresentation = typeInventory.kinds.contains(.image)
-            || typeInventory.kinds.contains(.fileURL)
-        let isPrivacySensitive = !shouldStoreInHistory
         let linkWasPreparedForAutomaticCleaning = prepared.linkWasPreparedForAutomaticCleaning
         let automationResult = prepared.automationResult
         let shouldFlattenRichText = prepared.shouldFlattenRichText
+        // Detection and alert priority use the original copy. Automatic
+        // cleaning must never erase the evidence that decides whether a red
+        // warning remains mandatory. The candidate is reanalyzed before any
+        // pasteboard write so residual red findings can quarantine the result.
+        let analysis = prepared.originalAnalysis
+
+        if clipboardAutomationProtocol == .visualTransfer {
+            if let skipReason = automationResult.skipReason {
+                let audit = ClipboardAutomaticCleaningAudit(
+                    selectedProtocol: .visualTransfer,
+                    didWriteCleanedText: false,
+                    removedElementCount: 0,
+                    replacedElementCount: 0,
+                    originalAlertCount: analysis.cleanReceiptAlertCount,
+                    remainingAlertCount: analysis.cleanReceiptAlertCount,
+                    originalPriority: analysis.cleanReceiptPriority,
+                    remainingPriority: analysis.cleanReceiptPriority,
+                    skipReason: skipReason
+                )
+                status = localizedClipboardAutomationSkip(skipReason)
+                recordClipboardOutcome(
+                    copiedText: copiedText,
+                    capturedAt: capturedAt,
+                    sourceApplicationName: sourceApplicationName,
+                    sourceBundleIdentifier: sourceBundleIdentifier,
+                    shouldStoreInHistory: shouldStoreInHistory,
+                    typeInventory: typeInventory,
+                    fileMetadataAlert: fileMetadataAlert,
+                    originalAnalysis: analysis,
+                    initialLinkCleaning: initialLinkCleaning,
+                    resultLinkCleaning: initialLinkCleaning,
+                    audit: audit,
+                    didReplaceClipboard: false,
+                    cleanedText: nil,
+                    resultPasteboardChangeCount: expectedChangeCount
+                )
+            } else {
+                scheduleAutomaticVisualTransfer(
+                    AutomaticVisualTransferContext(
+                        originalText: copiedText,
+                        ocrSourceText: effectiveText,
+                        expectedChangeCount: expectedChangeCount,
+                        capturedAt: capturedAt,
+                        sourceApplicationName: sourceApplicationName,
+                        sourceBundleIdentifier: sourceBundleIdentifier,
+                        shouldStoreInHistory: shouldStoreInHistory,
+                        typeInventory: typeInventory,
+                        fileMetadataAlert: fileMetadataAlert,
+                        prepared: prepared
+                    )
+                )
+            }
+            return
+        }
+
+        let candidateAnalysis = effectiveText == copiedText
+            ? analysis
+            : prepared.finalAnalysis
+        let candidatePriority = candidateAnalysis.cleanReceiptPriority
+        let candidateShouldBeQuarantined = (effectiveText != copiedText || shouldFlattenRichText)
+            && ClipboardAutomationPolicy.shouldQuarantineAutomaticReplacement(
+                candidatePriority: candidatePriority,
+                skipReason: automationResult.skipReason
+            )
 
         var automaticallyCleaned = false
-        var automaticTextCleaningApplied = false
-        if effectiveText != copiedText || shouldFlattenRichText {
+        var cleanedPasteboardChangeCount: Int?
+        if candidateShouldBeQuarantined {
+            effectiveText = copiedText
+            status = localized("Clean Receipt quarantined this copy. A high-risk finding remained after reanalysis, so SignalSieve did not overwrite the clipboard.")
+        } else if effectiveText != copiedText || shouldFlattenRichText {
             automaticallyCleaned = replaceClipboard(
+                expectedChangeCount: expectedChangeCount,
                 expectedText: copiedText,
                 replacement: effectiveText
             )
             if !automaticallyCleaned {
                 effectiveText = copiedText
             } else if automationResult.didChange {
-                automaticTextCleaningApplied = true
+                cleanedPasteboardChangeCount = pasteboard.changeCount
                 status = formatted(
                     "%@ automatically cleaned this copy: removed %d and replaced %d element(s).",
                     AppLocalization.text(
@@ -932,9 +1048,10 @@ final class SignalSieveViewModel: ObservableObject {
                     automationResult.replacedCount
                 )
             } else if shouldFlattenRichText {
-                automaticTextCleaningApplied = true
+                cleanedPasteboardChangeCount = pasteboard.changeCount
                 status = localized("Strict Clean converted this copy to plain text and removed its HTML or rich-text formatting.")
             } else if linkWasPreparedForAutomaticCleaning {
+                cleanedPasteboardChangeCount = pasteboard.changeCount
                 status = formatted(
                     "Active Guard automatically cleaned %d copied link(s).",
                     initialLinkCleaning.linksChanged
@@ -949,20 +1066,6 @@ final class SignalSieveViewModel: ObservableObject {
             status = localizedClipboardAutomationSkip(skipReason)
         }
 
-        if clipboardAutomationProtocol == .visualTransfer {
-            scheduleAutomaticVisualTransfer(
-                text: effectiveText,
-                expectedChangeCount: NSPasteboard.general.changeCount,
-                isLikelyCode: copiedCodeAnalysis.isLikelyCode,
-                hasNonTextRepresentation: hasNonTextRepresentation,
-                isPrivacySensitive: isPrivacySensitive
-            )
-        }
-
-        // Detection and alert priority use the original copy. Automatic
-        // cleaning must never erase the evidence that decides whether a red
-        // warning remains mandatory.
-        let analysis = prepared.originalAnalysis
         let finalClipboardAnalysis = effectiveText == copiedText
             ? analysis
             : prepared.finalAnalysis
@@ -972,16 +1075,63 @@ final class SignalSieveViewModel: ObservableObject {
         let automaticCleaningAudit = clipboardAutomationProtocol.cleaningMode.map { mode in
             ClipboardAutomaticCleaningAudit(
                 mode: mode,
-                didWriteCleanedText: automaticTextCleaningApplied,
-                removedElementCount: automationResult.removedCount,
+                selectedProtocol: clipboardAutomationProtocol,
+                didWriteCleanedText: automaticallyCleaned,
+                removedElementCount: automationResult.removedCount
+                    + (automaticallyCleaned && linkWasPreparedForAutomaticCleaning
+                        ? initialLinkCleaning.removedParameterCount
+                        : 0),
                 replacedElementCount: automationResult.replacedCount,
-                originalAlertCount: Self.automaticTextAlertCount(in: analysis),
-                remainingAlertCount: Self.automaticTextAlertCount(in: finalClipboardAnalysis),
-                originalPriority: Self.automaticTextPriority(in: analysis),
-                remainingPriority: Self.automaticTextPriority(in: finalClipboardAnalysis),
+                originalAlertCount: analysis.cleanReceiptAlertCount,
+                remainingAlertCount: Self.cleanReceiptAlertCount(
+                    in: candidateShouldBeQuarantined ? candidateAnalysis : finalClipboardAnalysis
+                ),
+                originalPriority: analysis.cleanReceiptPriority,
+                remainingPriority: Self.cleanReceiptPriority(
+                    in: candidateShouldBeQuarantined ? candidateAnalysis : finalClipboardAnalysis
+                ),
                 skipReason: automationResult.skipReason
             )
         }
+        recordClipboardOutcome(
+            copiedText: copiedText,
+            capturedAt: capturedAt,
+            sourceApplicationName: sourceApplicationName,
+            sourceBundleIdentifier: sourceBundleIdentifier,
+            shouldStoreInHistory: shouldStoreInHistory,
+            typeInventory: typeInventory,
+            fileMetadataAlert: fileMetadataAlert,
+            originalAnalysis: analysis,
+            initialLinkCleaning: initialLinkCleaning,
+            resultLinkCleaning: candidateShouldBeQuarantined
+                ? initialLinkCleaning
+                : finalLinkCleaning,
+            audit: automaticCleaningAudit,
+            didReplaceClipboard: automaticallyCleaned,
+            cleanedText: automaticallyCleaned ? effectiveText : nil,
+            resultPasteboardChangeCount: automaticallyCleaned
+                ? (cleanedPasteboardChangeCount ?? pasteboard.changeCount)
+                : expectedChangeCount
+        )
+    }
+
+    private func recordClipboardOutcome(
+        copiedText: String,
+        capturedAt: Date,
+        sourceApplicationName: String?,
+        sourceBundleIdentifier: String?,
+        shouldStoreInHistory: Bool,
+        typeInventory: ClipboardTypeInventory,
+        fileMetadataAlert: Bool,
+        originalAnalysis analysis: ClipboardProtectionAnalysis,
+        initialLinkCleaning: URLCleaningResult,
+        resultLinkCleaning: URLCleaningResult,
+        audit: ClipboardAutomaticCleaningAudit?,
+        didReplaceClipboard: Bool,
+        cleanedText: String?,
+        resultPasteboardChangeCount: Int,
+        shouldPresentNotice: Bool = true
+    ) {
         patternTexts = analysis.updatedPatternTexts
         patternReport = PatternAnalyzer.analyze(patternTexts)
         identifierAnalysis = analysis.identifierAnalysis
@@ -1003,6 +1153,12 @@ final class SignalSieveViewModel: ObservableObject {
             )
         }
 
+        let canExposeCleanResult = shouldStoreInHistory
+            && didReplaceClipboard
+            && cleanedText != nil
+            && copiedText.count <= ClipboardHistory.maximumStoredCharacters
+            && (cleanedText?.count ?? .max) <= ClipboardHistory.maximumStoredCharacters
+
         if shouldStoreInHistory {
             let entry = ClipboardHistory.makeEntry(
                 text: copiedText,
@@ -1019,11 +1175,17 @@ final class SignalSieveViewModel: ObservableObject {
                 scamThreatLevel: analysis.scamAnalysis.isPotentialScam
                     ? analysis.scamAnalysis.threatLevel
                     : nil,
-                wasAutomaticallyCleaned: automaticallyCleaned,
-                automaticCleaningAudit: automaticCleaningAudit
+                wasAutomaticallyCleaned: didReplaceClipboard,
+                automaticCleaningAudit: audit,
+                cleanedText: canExposeCleanResult ? cleanedText : nil,
+                cleanedPasteboardChangeCount: canExposeCleanResult
+                    ? resultPasteboardChangeCount
+                    : nil
             )
             clipboardHistory = ClipboardHistory.appending(entry, to: clipboardHistory)
         }
+
+        guard shouldPresentNotice else { return }
 
         let includesCodeWarnings = ClipboardAlertVisibilityPolicy.shouldIncludeCategory(
             isEnabled: warnsAboutCodeRisks,
@@ -1044,7 +1206,7 @@ final class SignalSieveViewModel: ObservableObject {
             ? 0
             : rawHiddenCount
         let trackedLinkCount = warnsAboutTrackedLinks
-            ? finalLinkCleaning.linksFlagged
+            ? resultLinkCleaning.linksFlagged
             : 0
         let alertPatternReport = warnsAboutPatterns && analysis.containsRecentPattern
             ? analysis.recentPatternReport
@@ -1078,6 +1240,7 @@ final class SignalSieveViewModel: ObservableObject {
                 || alertIdentifierAnalysis.containsIdentifiers
                 || alertScamAnalysis.isPotentialScam
                 || alertAdaptiveAnalysis.isAnomalous
+                || audit?.receipt.verdict == .riskRemainsDoNotShare
                 || fileMetadataAlert else {
             return
         }
@@ -1097,14 +1260,18 @@ final class SignalSieveViewModel: ObservableObject {
             binaryKind: binaryDetection.kind,
             binaryByteCount: binaryDetection.byteCount,
             trackedLinkCount: trackedLinkCount,
-            removedParameterCount: trackedLinkCount > 0 ? initialLinkCleaning.removedParameterCount : 0,
+            removedParameterCount: trackedLinkCount > 0
+                ? initialLinkCleaning.removedParameterCount
+                : 0,
             patternReport: alertPatternReport,
             identifierAnalysis: alertIdentifierAnalysis,
             scamAnalysis: alertScamAnalysis,
             adaptiveAnalysis: alertAdaptiveAnalysis,
             clipboardContentKinds: fileMetadataAlert ? typeInventory.kinds : [],
-            pasteboardChangeCount: pasteboard.changeCount,
-            automaticCleaningAudit: automaticCleaningAudit
+            pasteboardChangeCount: resultPasteboardChangeCount,
+            automaticCleaningAudit: audit,
+            cleanedClipboardText: canExposeCleanResult ? cleanedText : nil,
+            canRestoreOriginal: canExposeCleanResult
         )
         guard ClipboardAlertVisibilityPolicy.shouldPresent(
             notice.priority,
@@ -1122,6 +1289,8 @@ final class SignalSieveViewModel: ObservableObject {
             onEnableAutoClean: { [weak self] in self?.enableAutomaticLinkCleaning(from: notice) },
             onShowPatterns: { [weak self] in self?.revealPatternReport() },
             onOpenFileInspector: { [weak self] in self?.revealFileProvenanceInspector(from: notice) },
+            onCopyCleanResult: { [weak self] in self?.copyCleanResult(from: notice) },
+            onRestoreOriginal: { [weak self] in self?.restoreOriginal(from: notice) },
             alertVisibility: clipboardAlertVisibility,
             onSetAlertVisibility: { [weak self] visibility in
                 self?.setClipboardAlertVisibility(visibility)
@@ -1177,6 +1346,42 @@ final class SignalSieveViewModel: ObservableObject {
         automaticallyCleansLinks = true
         cleanCopiedLinks(from: notice)
         status = localized("Automatic link cleaning is on. Future copied links will be cleaned locally.")
+    }
+
+    private func copyCleanResult(from notice: ClipboardNotice) {
+        guard let cleanedText = notice.cleanedClipboardText else {
+            status = localized("No clean result is available for this copy.")
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        let expected = ClipboardPlainTextSnapshot(
+            changeCount: notice.pasteboardChangeCount,
+            text: cleanedText
+        )
+        guard ClipboardPlainTextWriter.matches(expected, on: pasteboard) else {
+            status = localized("The clipboard changed after the receipt, so SignalSieve did not copy the clean result.")
+            return
+        }
+        status = localized("The clean result is already on the clipboard.")
+        noticePanel.dismissCurrent()
+    }
+
+    private func restoreOriginal(from notice: ClipboardNotice) {
+        guard notice.canRestoreOriginal,
+              let cleanedText = notice.cleanedClipboardText else {
+            status = localized("The original is not restorable for this copy.")
+            return
+        }
+        guard replaceClipboard(
+            expectedChangeCount: notice.pasteboardChangeCount,
+            expectedText: cleanedText,
+            replacement: notice.clipboardText
+        ) else {
+            status = localized("The clipboard changed after the receipt, so SignalSieve did not restore the original.")
+            return
+        }
+        status = localized("Restored the original text from session memory.")
+        noticePanel.dismissCurrent()
     }
 
     private func revealPatternReport() {
@@ -1327,7 +1532,23 @@ final class SignalSieveViewModel: ObservableObject {
                 : "Strict Clean is automatic. The current copy needed no changes.")
             return
         }
-        guard replaceClipboard(expectedText: currentText, replacement: result.text) else {
+        let candidateAnalysis = ClipboardProtectionAnalyzer.analyze(
+            result.text,
+            recentPatternTexts: [],
+            customRules: privateRules
+        )
+        guard !ClipboardAutomationPolicy.shouldQuarantineAutomaticReplacement(
+            candidatePriority: candidateAnalysis.cleanReceiptPriority,
+            skipReason: result.skipReason
+        ) else {
+            status = localized("Clean Receipt quarantined this copy. A high-risk finding remained after reanalysis, so SignalSieve did not overwrite the clipboard.")
+            return
+        }
+        guard replaceClipboard(
+            expectedChangeCount: notice.pasteboardChangeCount,
+            expectedText: currentText,
+            replacement: result.text
+        ) else {
             status = localized("Clipboard Protocol was saved, but the current clipboard changed before cleaning.")
             return
         }
@@ -1341,81 +1562,415 @@ final class SignalSieveViewModel: ObservableObject {
             )
     }
 
+    private func scheduleAutomaticVisualTransfer(
+        _ context: AutomaticVisualTransferContext
+    ) {
+        automaticVisualTransferTask?.cancel()
+        status = localized("Automatic Visual Transfer is rebuilding this copy with local OCR…")
+        let customRules = privateRules
+        automaticVisualTransferTask = Task { [weak self] in
+            do {
+                let processed = try await Task.detached(priority: .userInitiated) {
+                    let result = try VisualTransfer.roundTrip(context.ocrSourceText)
+                    let analysis = ClipboardProtectionAnalyzer.analyze(
+                        result.text,
+                        recentPatternTexts: [],
+                        customRules: customRules
+                    )
+                    return (result, analysis)
+                }.value
+                guard !Task.isCancelled, let self else { return }
+                guard self.isActiveProtectionEnabled,
+                      self.clipboardAutomationProtocol == .visualTransfer else { return }
+                let expectedSnapshot = ClipboardPlainTextSnapshot(
+                    changeCount: context.expectedChangeCount,
+                    text: context.originalText
+                )
+                guard ClipboardPlainTextWriter.matches(
+                    expectedSnapshot,
+                    on: NSPasteboard.general
+                ) else {
+                    self.status = self.localized("The clipboard changed before Automatic Visual Transfer finished, so SignalSieve did not overwrite it.")
+                    return
+                }
+
+                let originalAnalysis = context.prepared.originalAnalysis
+                let initialLinks = context.prepared.initialLinkCleaning
+
+                guard ClipboardAutomationPolicy.acceptsAutomaticVisualTransfer(
+                    original: context.ocrSourceText,
+                    candidate: processed.0.text
+                ) else {
+                    let audit = ClipboardAutomaticCleaningAudit(
+                        selectedProtocol: .visualTransfer,
+                        didWriteCleanedText: false,
+                        removedElementCount: 0,
+                        replacedElementCount: 0,
+                        originalAlertCount: originalAnalysis.cleanReceiptAlertCount,
+                        remainingAlertCount: originalAnalysis.cleanReceiptAlertCount,
+                        originalPriority: originalAnalysis.cleanReceiptPriority,
+                        remainingPriority: originalAnalysis.cleanReceiptPriority,
+                        skipReason: .visualTransferIntegrityCheckFailed
+                    )
+                    self.status = self.localized("Automatic Visual Transfer did not overwrite this copy because OCR changed a URL, number, quotation, or produced an unsafe result.")
+                    self.recordClipboardOutcome(
+                        copiedText: context.originalText,
+                        capturedAt: context.capturedAt,
+                        sourceApplicationName: context.sourceApplicationName,
+                        sourceBundleIdentifier: context.sourceBundleIdentifier,
+                        shouldStoreInHistory: context.shouldStoreInHistory,
+                        typeInventory: context.typeInventory,
+                        fileMetadataAlert: context.fileMetadataAlert,
+                        originalAnalysis: originalAnalysis,
+                        initialLinkCleaning: initialLinks,
+                        resultLinkCleaning: initialLinks,
+                        audit: audit,
+                        didReplaceClipboard: false,
+                        cleanedText: nil,
+                        resultPasteboardChangeCount: context.expectedChangeCount
+                    )
+                    return
+                }
+
+                let candidateAnalysis = processed.1
+                guard !ClipboardAutomationPolicy.shouldQuarantineAutomaticReplacement(
+                    candidatePriority: candidateAnalysis.cleanReceiptPriority,
+                    skipReason: nil
+                ) else {
+                    let audit = ClipboardAutomaticCleaningAudit(
+                        selectedProtocol: .visualTransfer,
+                        didWriteCleanedText: false,
+                        removedElementCount: 0,
+                        replacedElementCount: 0,
+                        originalAlertCount: originalAnalysis.cleanReceiptAlertCount,
+                        remainingAlertCount: candidateAnalysis.cleanReceiptAlertCount,
+                        originalPriority: originalAnalysis.cleanReceiptPriority,
+                        remainingPriority: candidateAnalysis.cleanReceiptPriority
+                    )
+                    self.status = self.localized("Clean Receipt quarantined this copy. A high-risk finding remained after reanalysis, so SignalSieve did not overwrite the clipboard.")
+                    self.recordClipboardOutcome(
+                        copiedText: context.originalText,
+                        capturedAt: context.capturedAt,
+                        sourceApplicationName: context.sourceApplicationName,
+                        sourceBundleIdentifier: context.sourceBundleIdentifier,
+                        shouldStoreInHistory: context.shouldStoreInHistory,
+                        typeInventory: context.typeInventory,
+                        fileMetadataAlert: context.fileMetadataAlert,
+                        originalAnalysis: originalAnalysis,
+                        initialLinkCleaning: initialLinks,
+                        resultLinkCleaning: initialLinks,
+                        audit: audit,
+                        didReplaceClipboard: false,
+                        cleanedText: nil,
+                        resultPasteboardChangeCount: context.expectedChangeCount
+                    )
+                    return
+                }
+
+                guard self.replaceClipboard(
+                    expectedChangeCount: context.expectedChangeCount,
+                    expectedText: context.originalText,
+                    replacement: processed.0.text
+                ) else {
+                    self.status = self.localized("The clipboard changed before Automatic Visual Transfer finished, so SignalSieve did not overwrite it.")
+                    return
+                }
+
+                let audit = ClipboardAutomaticCleaningAudit(
+                    selectedProtocol: .visualTransfer,
+                    didWriteCleanedText: true,
+                    removedElementCount: 0,
+                    replacedElementCount: 0,
+                    originalAlertCount: originalAnalysis.cleanReceiptAlertCount,
+                    remainingAlertCount: candidateAnalysis.cleanReceiptAlertCount,
+                    originalPriority: originalAnalysis.cleanReceiptPriority,
+                    remainingPriority: candidateAnalysis.cleanReceiptPriority
+                )
+                let resultChangeCount = NSPasteboard.general.changeCount
+                self.output = processed.0.text
+                self.status = self.formatted(
+                    "Automatic Visual Transfer rebuilt this copy with local OCR: %d characters recognized. Review it before use.",
+                    processed.0.recognizedCharacterCount
+                )
+                self.recordClipboardOutcome(
+                    copiedText: context.originalText,
+                    capturedAt: context.capturedAt,
+                    sourceApplicationName: context.sourceApplicationName,
+                    sourceBundleIdentifier: context.sourceBundleIdentifier,
+                    shouldStoreInHistory: context.shouldStoreInHistory,
+                    typeInventory: context.typeInventory,
+                    fileMetadataAlert: context.fileMetadataAlert,
+                    originalAnalysis: originalAnalysis,
+                    initialLinkCleaning: initialLinks,
+                    resultLinkCleaning: candidateAnalysis.linkCleaning,
+                    audit: audit,
+                    didReplaceClipboard: true,
+                    cleanedText: processed.0.text,
+                    resultPasteboardChangeCount: resultChangeCount
+                )
+            } catch {
+                guard !Task.isCancelled, let self else { return }
+                let expectedSnapshot = ClipboardPlainTextSnapshot(
+                    changeCount: context.expectedChangeCount,
+                    text: context.originalText
+                )
+                guard ClipboardPlainTextWriter.matches(
+                    expectedSnapshot,
+                    on: NSPasteboard.general
+                ) else {
+                    self.status = self.localized("The clipboard changed before Automatic Visual Transfer finished, so SignalSieve did not overwrite it.")
+                    return
+                }
+                let originalAnalysis = context.prepared.originalAnalysis
+                let audit = ClipboardAutomaticCleaningAudit(
+                    selectedProtocol: .visualTransfer,
+                    didWriteCleanedText: false,
+                    removedElementCount: 0,
+                    replacedElementCount: 0,
+                    originalAlertCount: originalAnalysis.cleanReceiptAlertCount,
+                    remainingAlertCount: originalAnalysis.cleanReceiptAlertCount,
+                    originalPriority: originalAnalysis.cleanReceiptPriority,
+                    remainingPriority: originalAnalysis.cleanReceiptPriority,
+                    skipReason: .visualTransferFailed
+                )
+                self.status = self.formatted(
+                    "Automatic Visual Transfer failed: %@",
+                    error.localizedDescription
+                )
+                self.recordClipboardOutcome(
+                    copiedText: context.originalText,
+                    capturedAt: context.capturedAt,
+                    sourceApplicationName: context.sourceApplicationName,
+                    sourceBundleIdentifier: context.sourceBundleIdentifier,
+                    shouldStoreInHistory: context.shouldStoreInHistory,
+                    typeInventory: context.typeInventory,
+                    fileMetadataAlert: context.fileMetadataAlert,
+                    originalAnalysis: originalAnalysis,
+                    initialLinkCleaning: context.prepared.initialLinkCleaning,
+                    resultLinkCleaning: context.prepared.initialLinkCleaning,
+                    audit: audit,
+                    didReplaceClipboard: false,
+                    cleanedText: nil,
+                    resultPasteboardChangeCount: context.expectedChangeCount
+                )
+            }
+        }
+    }
+
     private func scheduleAutomaticVisualTransfer(from notice: ClipboardNotice) {
         let pasteboard = NSPasteboard.general
-        guard pasteboard.changeCount == notice.pasteboardChangeCount,
-              let currentText = pasteboard.string(forType: .string) else {
+        let expectedSnapshot = ClipboardPlainTextSnapshot(
+            changeCount: notice.pasteboardChangeCount,
+            text: notice.clipboardText
+        )
+        guard ClipboardPlainTextWriter.matches(expectedSnapshot, on: pasteboard) else {
             status = localized("Clipboard Protocol was saved, but the current clipboard changed before processing.")
             return
         }
+        let currentText = notice.clipboardText
         let typeInventory = ClipboardTypeAnalyzer.analyze(
             typeIdentifiers: (pasteboard.types ?? []).map(\.rawValue)
         )
-        scheduleAutomaticVisualTransfer(
-            text: currentText,
-            expectedChangeCount: pasteboard.changeCount,
-            isLikelyCode: CodeGuardAnalyzer.analyze(currentText).isLikelyCode,
-            hasNonTextRepresentation: typeInventory.requiresFileProvenanceReview,
-            isPrivacySensitive: !Self.shouldStoreInClipboardHistory(pasteboard)
-        )
-    }
-
-    private func scheduleAutomaticVisualTransfer(
-        text: String,
-        expectedChangeCount: Int,
-        isLikelyCode: Bool,
-        hasNonTextRepresentation: Bool,
-        isPrivacySensitive: Bool
-    ) {
+        let isPrivacySensitive = !Self.shouldStoreInClipboardHistory(pasteboard)
         if let skipReason = ClipboardAutomationPolicy.skipReason(
             for: .visualTransfer,
-            text: text,
-            isLikelyCode: isLikelyCode,
-            hasNonTextRepresentation: hasNonTextRepresentation,
+            text: currentText,
+            isLikelyCode: CodeGuardAnalyzer.analyze(currentText).isLikelyCode,
+            hasNonTextRepresentation: typeInventory.requiresFileProvenanceReview,
             isPrivacySensitive: isPrivacySensitive
         ) {
             status = localizedClipboardAutomationSkip(skipReason)
+            let originalAnalysis = ClipboardProtectionAnalyzer.analyze(
+                currentText,
+                recentPatternTexts: [],
+                customRules: privateRules
+            )
+            let audit = ClipboardAutomaticCleaningAudit(
+                selectedProtocol: .visualTransfer,
+                didWriteCleanedText: false,
+                removedElementCount: 0,
+                replacedElementCount: 0,
+                originalAlertCount: originalAnalysis.cleanReceiptAlertCount,
+                remainingAlertCount: originalAnalysis.cleanReceiptAlertCount,
+                originalPriority: originalAnalysis.cleanReceiptPriority,
+                remainingPriority: originalAnalysis.cleanReceiptPriority,
+                skipReason: skipReason
+            )
+            presentUpdatedCleanReceipt(
+                audit,
+                from: notice,
+                changeCount: expectedSnapshot.changeCount,
+                cleanedText: nil,
+                canRestoreOriginal: false
+            )
             return
         }
 
         automaticVisualTransferTask?.cancel()
         status = localized("Automatic Visual Transfer is rebuilding this copy with local OCR…")
+        let customRules = privateRules
         automaticVisualTransferTask = Task { [weak self] in
             do {
-                let result = try await Task.detached(priority: .userInitiated) {
-                    try VisualTransfer.roundTrip(text)
+                let processed = try await Task.detached(priority: .userInitiated) {
+                    let result = try VisualTransfer.roundTrip(currentText)
+                    let originalAnalysis = ClipboardProtectionAnalyzer.analyze(
+                        currentText,
+                        recentPatternTexts: [],
+                        customRules: customRules
+                    )
+                    let candidateAnalysis = ClipboardProtectionAnalyzer.analyze(
+                        result.text,
+                        recentPatternTexts: [],
+                        customRules: customRules
+                    )
+                    return (result, originalAnalysis, candidateAnalysis)
                 }.value
                 guard !Task.isCancelled, let self else { return }
                 guard self.clipboardAutomationProtocol == .visualTransfer else { return }
-
-                let pasteboard = NSPasteboard.general
-                guard pasteboard.changeCount == expectedChangeCount,
-                      pasteboard.string(forType: .string) == text else {
+                guard ClipboardPlainTextWriter.matches(
+                    expectedSnapshot,
+                    on: NSPasteboard.general
+                ) else {
                     self.status = self.localized("The clipboard changed before Automatic Visual Transfer finished, so SignalSieve did not overwrite it.")
                     return
                 }
                 guard ClipboardAutomationPolicy.acceptsAutomaticVisualTransfer(
-                    original: text,
-                    candidate: result.text
+                    original: currentText,
+                    candidate: processed.0.text
                 ) else {
+                    let audit = ClipboardAutomaticCleaningAudit(
+                        selectedProtocol: .visualTransfer,
+                        didWriteCleanedText: false,
+                        removedElementCount: 0,
+                        replacedElementCount: 0,
+                        originalAlertCount: processed.1.cleanReceiptAlertCount,
+                        remainingAlertCount: processed.1.cleanReceiptAlertCount,
+                        originalPriority: processed.1.cleanReceiptPriority,
+                        remainingPriority: processed.1.cleanReceiptPriority,
+                        skipReason: .visualTransferIntegrityCheckFailed
+                    )
                     self.status = self.localized("Automatic Visual Transfer did not overwrite this copy because OCR changed a URL, number, quotation, or produced an unsafe result.")
+                    self.presentUpdatedCleanReceipt(
+                        audit,
+                        from: notice,
+                        changeCount: expectedSnapshot.changeCount,
+                        cleanedText: nil,
+                        canRestoreOriginal: false
+                    )
+                    return
+                }
+                guard !ClipboardAutomationPolicy.shouldQuarantineAutomaticReplacement(
+                    candidatePriority: processed.2.cleanReceiptPriority,
+                    skipReason: nil
+                ) else {
+                    let audit = ClipboardAutomaticCleaningAudit(
+                        selectedProtocol: .visualTransfer,
+                        didWriteCleanedText: false,
+                        removedElementCount: 0,
+                        replacedElementCount: 0,
+                        originalAlertCount: processed.1.cleanReceiptAlertCount,
+                        remainingAlertCount: processed.2.cleanReceiptAlertCount,
+                        originalPriority: processed.1.cleanReceiptPriority,
+                        remainingPriority: processed.2.cleanReceiptPriority
+                    )
+                    self.status = self.localized("Clean Receipt quarantined this copy. A high-risk finding remained after reanalysis, so SignalSieve did not overwrite the clipboard.")
+                    self.presentUpdatedCleanReceipt(
+                        audit,
+                        from: notice,
+                        changeCount: expectedSnapshot.changeCount,
+                        cleanedText: nil,
+                        canRestoreOriginal: false
+                    )
                     return
                 }
 
-                self.writeClipboard(result.text)
-                self.output = result.text
+                guard self.replaceClipboard(
+                    expectedChangeCount: expectedSnapshot.changeCount,
+                    expectedText: expectedSnapshot.text,
+                    replacement: processed.0.text
+                ) else {
+                    self.status = self.localized("The clipboard changed before Automatic Visual Transfer finished, so SignalSieve did not overwrite it.")
+                    return
+                }
+                let audit = ClipboardAutomaticCleaningAudit(
+                    selectedProtocol: .visualTransfer,
+                    didWriteCleanedText: true,
+                    removedElementCount: 0,
+                    replacedElementCount: 0,
+                    originalAlertCount: processed.1.cleanReceiptAlertCount,
+                    remainingAlertCount: processed.2.cleanReceiptAlertCount,
+                    originalPriority: processed.1.cleanReceiptPriority,
+                    remainingPriority: processed.2.cleanReceiptPriority
+                )
+                let changeCount = NSPasteboard.general.changeCount
+                self.output = processed.0.text
                 self.status = self.formatted(
                     "Automatic Visual Transfer rebuilt this copy with local OCR: %d characters recognized. Review it before use.",
-                    result.recognizedCharacterCount
+                    processed.0.recognizedCharacterCount
+                )
+                self.presentUpdatedCleanReceipt(
+                    audit,
+                    from: notice,
+                    changeCount: changeCount,
+                    cleanedText: processed.0.text,
+                    canRestoreOriginal: !isPrivacySensitive
+                        && currentText.count <= ClipboardHistory.maximumStoredCharacters
+                        && processed.0.text.count <= ClipboardHistory.maximumStoredCharacters
                 )
             } catch {
                 guard !Task.isCancelled, let self else { return }
+                guard ClipboardPlainTextWriter.matches(
+                    expectedSnapshot,
+                    on: NSPasteboard.general
+                ) else {
+                    self.status = self.localized("The clipboard changed before Automatic Visual Transfer finished, so SignalSieve did not overwrite it.")
+                    return
+                }
+                let originalAnalysis = ClipboardProtectionAnalyzer.analyze(
+                    currentText,
+                    recentPatternTexts: [],
+                    customRules: customRules
+                )
+                let audit = ClipboardAutomaticCleaningAudit(
+                    selectedProtocol: .visualTransfer,
+                    didWriteCleanedText: false,
+                    removedElementCount: 0,
+                    replacedElementCount: 0,
+                    originalAlertCount: originalAnalysis.cleanReceiptAlertCount,
+                    remainingAlertCount: originalAnalysis.cleanReceiptAlertCount,
+                    originalPriority: originalAnalysis.cleanReceiptPriority,
+                    remainingPriority: originalAnalysis.cleanReceiptPriority,
+                    skipReason: .visualTransferFailed
+                )
                 self.status = self.formatted(
                     "Automatic Visual Transfer failed: %@",
                     error.localizedDescription
                 )
+                self.presentUpdatedCleanReceipt(
+                    audit,
+                    from: notice,
+                    changeCount: expectedSnapshot.changeCount,
+                    cleanedText: nil,
+                    canRestoreOriginal: false
+                )
             }
         }
+    }
+
+    private func presentUpdatedCleanReceipt(
+        _ audit: ClipboardAutomaticCleaningAudit,
+        from notice: ClipboardNotice,
+        changeCount: Int,
+        cleanedText: String?,
+        canRestoreOriginal: Bool
+    ) {
+        noticePanel.dismissCurrent()
+        present(notice.withCleanReceipt(
+            audit,
+            pasteboardChangeCount: changeCount,
+            cleanedClipboardText: cleanedText,
+            canRestoreOriginal: canRestoreOriginal
+        ))
     }
 
     private func localizedClipboardAutomationSkip(
@@ -1433,6 +1988,10 @@ final class SignalSieveViewModel: ObservableObject {
                 "Automatic Visual Transfer skipped text longer than %d characters.",
                 ClipboardAutomationPolicy.maximumAutomaticVisualTransferCharacterCount
             )
+        case .visualTransferIntegrityCheckFailed:
+            localized("Automatic Visual Transfer skipped replacement because its integrity check failed.")
+        case .visualTransferFailed:
+            localized("Automatic Visual Transfer skipped replacement because local OCR failed.")
         }
     }
 
@@ -1460,13 +2019,28 @@ final class SignalSieveViewModel: ObservableObject {
     }
 
     @discardableResult
-    private func replaceClipboard(expectedText: String, replacement: String) -> Bool {
+    private func replaceClipboard(
+        expectedChangeCount: Int? = nil,
+        expectedText: String,
+        replacement: String
+    ) -> Bool {
         let pasteboard = NSPasteboard.general
-        guard ClipboardPlainTextWriter.replace(
-            on: pasteboard,
-            expectedText: expectedText,
-            replacement: replacement
-        ) else { return false }
+        let didReplace: Bool
+        if let expectedChangeCount {
+            didReplace = ClipboardPlainTextWriter.replace(
+                on: pasteboard,
+                expectedChangeCount: expectedChangeCount,
+                expectedText: expectedText,
+                replacement: replacement
+            )
+        } else {
+            didReplace = ClipboardPlainTextWriter.replace(
+                on: pasteboard,
+                expectedText: expectedText,
+                replacement: replacement
+            )
+        }
+        guard didReplace else { return false }
         lastPasteboardChangeCount = pasteboard.changeCount
         return true
     }
@@ -1477,24 +2051,16 @@ final class SignalSieveViewModel: ObservableObject {
         lastPasteboardChangeCount = pasteboard.changeCount
     }
 
-    private static func automaticTextAlertCount(
+    private static func cleanReceiptAlertCount(
         in analysis: ClipboardProtectionAnalysis
     ) -> Int {
-        analysis.hiddenTextFindingCount
-            + analysis.codeAnalysis.findings.count
-            + (analysis.scamAnalysis.isPotentialScam ? analysis.scamAnalysis.signals.count : 0)
+        analysis.cleanReceiptAlertCount
     }
 
-    private static func automaticTextPriority(
+    private static func cleanReceiptPriority(
         in analysis: ClipboardProtectionAnalysis
     ) -> ClipboardAlertPriority {
-        ClipboardProtectionAnalyzer.alertPriority(
-            hiddenUnicodeRisk: analysis.hiddenTextRiskLevel,
-            codeRisk: analysis.codeAnalysis.highestRiskLevel,
-            scamThreat: analysis.scamAnalysis.isPotentialScam
-                ? analysis.scamAnalysis.threatLevel
-                : nil
-        )
+        analysis.cleanReceiptPriority
     }
 
     private static func shouldStoreInClipboardHistory(_ pasteboard: NSPasteboard) -> Bool {

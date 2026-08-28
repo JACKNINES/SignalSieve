@@ -49,17 +49,28 @@ struct ClipboardNotice: Identifiable {
     let clipboardContentKinds: [ClipboardContentKind]
     let pasteboardChangeCount: Int
     let automaticCleaningAudit: ClipboardAutomaticCleaningAudit?
+    let cleanedClipboardText: String?
+    let canRestoreOriginal: Bool
 
     var priority: ClipboardAlertPriority {
-        ClipboardProtectionAnalyzer.alertPriority(
+        let detectedPriority = ClipboardProtectionAnalyzer.alertPriority(
             hiddenUnicodeRisk: hiddenUnicodeRiskLevel,
             codeRisk: codeRiskLevel,
             scamThreat: scamAnalysis.isPotentialScam ? scamAnalysis.threatLevel : nil,
             hasElevatedSignal: trackedLinkCount > 0 || adaptiveAnalysis.isAnomalous
         )
+        if automaticCleaningAudit?.remainingPriority == .high
+            || automaticCleaningAudit?.originalPriority == .high {
+            return .high
+        }
+        return detectedPriority
     }
 
     var isHighPriority: Bool { priority == .high }
+    var hasCleanReceipt: Bool { automaticCleaningAudit != nil }
+    var hasCleanResultActions: Bool {
+        cleanedClipboardText != nil && canRestoreOriginal
+    }
 
     var warningKinds: Set<ClipboardWarningKind> {
         var kinds: Set<ClipboardWarningKind> = []
@@ -76,6 +87,36 @@ struct ClipboardNotice: Identifiable {
         if adaptiveAnalysis.isAnomalous { kinds.insert(.adaptiveAnomaly) }
         return kinds
     }
+
+    func withCleanReceipt(
+        _ audit: ClipboardAutomaticCleaningAudit,
+        pasteboardChangeCount: Int,
+        cleanedClipboardText: String?,
+        canRestoreOriginal: Bool
+    ) -> ClipboardNotice {
+        ClipboardNotice(
+            clipboardText: clipboardText,
+            hiddenUnicodeCount: hiddenUnicodeCount,
+            hiddenUnicodeRiskLevel: hiddenUnicodeRiskLevel,
+            codeRiskCount: codeRiskCount,
+            codeRiskLevel: codeRiskLevel,
+            codeLanguage: codeLanguage,
+            hasSpecificCodeLanguage: hasSpecificCodeLanguage,
+            binaryKind: binaryKind,
+            binaryByteCount: binaryByteCount,
+            trackedLinkCount: trackedLinkCount,
+            removedParameterCount: removedParameterCount,
+            patternReport: patternReport,
+            identifierAnalysis: identifierAnalysis,
+            scamAnalysis: scamAnalysis,
+            adaptiveAnalysis: adaptiveAnalysis,
+            clipboardContentKinds: clipboardContentKinds,
+            pasteboardChangeCount: pasteboardChangeCount,
+            automaticCleaningAudit: audit,
+            cleanedClipboardText: cleanedClipboardText,
+            canRestoreOriginal: canRestoreOriginal
+        )
+    }
 }
 
 @MainActor
@@ -88,6 +129,8 @@ final class ClipboardNoticePanelController {
         let onEnableAutoClean: () -> Void
         let onShowPatterns: () -> Void
         let onOpenFileInspector: () -> Void
+        let onCopyCleanResult: () -> Void
+        let onRestoreOriginal: () -> Void
         let alertVisibility: ClipboardAlertVisibility
         let onSetAlertVisibility: (ClipboardAlertVisibility) -> Void
         let clipboardProtocol: ClipboardAutomationProtocol
@@ -107,6 +150,8 @@ final class ClipboardNoticePanelController {
         onEnableAutoClean: @escaping () -> Void,
         onShowPatterns: @escaping () -> Void,
         onOpenFileInspector: @escaping () -> Void,
+        onCopyCleanResult: @escaping () -> Void,
+        onRestoreOriginal: @escaping () -> Void,
         alertVisibility: ClipboardAlertVisibility,
         onSetAlertVisibility: @escaping (ClipboardAlertVisibility) -> Void,
         clipboardProtocol: ClipboardAutomationProtocol,
@@ -120,6 +165,8 @@ final class ClipboardNoticePanelController {
             onEnableAutoClean: onEnableAutoClean,
             onShowPatterns: onShowPatterns,
             onOpenFileInspector: onOpenFileInspector,
+            onCopyCleanResult: onCopyCleanResult,
+            onRestoreOriginal: onRestoreOriginal,
             alertVisibility: alertVisibility,
             onSetAlertVisibility: onSetAlertVisibility,
             clipboardProtocol: clipboardProtocol,
@@ -165,6 +212,8 @@ final class ClipboardNoticePanelController {
             onEnableAutoClean: presentation.onEnableAutoClean,
             onShowPatterns: presentation.onShowPatterns,
             onOpenFileInspector: presentation.onOpenFileInspector,
+            onCopyCleanResult: presentation.onCopyCleanResult,
+            onRestoreOriginal: presentation.onRestoreOriginal,
             alertVisibility: presentation.alertVisibility,
             onSetAlertVisibility: presentation.onSetAlertVisibility,
             clipboardProtocol: presentation.clipboardProtocol,
@@ -259,6 +308,8 @@ private struct ClipboardNoticeView: View {
     let onEnableAutoClean: () -> Void
     let onShowPatterns: () -> Void
     let onOpenFileInspector: () -> Void
+    let onCopyCleanResult: () -> Void
+    let onRestoreOriginal: () -> Void
     let alertVisibility: ClipboardAlertVisibility
     let onSetAlertVisibility: (ClipboardAlertVisibility) -> Void
     let clipboardProtocol: ClipboardAutomationProtocol
@@ -309,6 +360,9 @@ private struct ClipboardNoticeView: View {
 
             if notice.isHighPriority, let audit = notice.automaticCleaningAudit {
                 automaticRedRiskBanner(audit)
+            }
+            if let audit = notice.automaticCleaningAudit {
+                cleanReceiptCard(audit.receipt)
             }
 
             ScrollView {
@@ -518,6 +572,14 @@ private struct ClipboardNoticeView: View {
                             .sieveSheetButton()
                             .help(localized("Opens the local comparison of recent session-only text samples."))
                     }
+                    if notice.hasCleanResultActions {
+                        Button(localized("Copy Clean Result"), action: onCopyCleanResult)
+                            .sieveSheetButton()
+                            .help(localized("Copies the cleaned text only if the clipboard still matches this receipt."))
+                        Button(localized("Restore Original"), action: onRestoreOriginal)
+                            .sieveSheetButton()
+                            .help(localized("Restores the original text only if the clipboard still holds the clean result."))
+                    }
                     Spacer(minLength: 0)
                 }
 
@@ -556,6 +618,10 @@ private struct ClipboardNoticeView: View {
     private var headline: String {
         if notice.warningKinds.count > 1 {
             return localized("Multiple clipboard warnings")
+        }
+        if notice.automaticCleaningAudit?.receipt.verdict == .riskRemainsDoNotShare,
+           notice.warningKinds.isEmpty {
+            return localized("Automatic cleaning result quarantined")
         }
         if notice.hiddenUnicodeCount > 0 {
             return localized("Hidden Unicode detected in copied text")
@@ -617,7 +683,7 @@ private struct ClipboardNoticeView: View {
         _ audit: ClipboardAutomaticCleaningAudit
     ) -> some View {
         let removed = audit.redRiskWasRemoved
-        let mode = localized(audit.mode == .safe ? "Safe Clean" : "Strict Clean")
+        let mode = protocolName(audit.selectedProtocol)
         let title = removed
             ? formatted("%@ removed the detected red text risk from the current clipboard", mode)
             : formatted("%@ did not remove every red finding", mode)
@@ -643,6 +709,120 @@ private struct ClipboardNoticeView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 9)
                 .stroke(color.opacity(0.35), lineWidth: 1)
+        }
+    }
+
+    private func cleanReceiptCard(_ receipt: ClipboardCleanReceipt) -> some View {
+        let color = receiptColor(receipt.verdict)
+        return VStack(alignment: .leading, spacing: 8) {
+            Label {
+                Text(cleanReceiptVerdictText(receipt.verdict))
+                    .font(.subheadline.weight(.semibold))
+            } icon: {
+                Image(systemName: receiptIcon(receipt.verdict))
+                    .foregroundStyle(color)
+            }
+            Text(localized(receipt.reason))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            DisclosureGroup(localized("Technical evidence")) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(formatted(
+                        "Protocol: %@",
+                        protocolName(receipt.selectedProtocol)
+                    ))
+                    Text(formatted(
+                        "Original alerts: %d · highest severity: %@",
+                        receipt.originalAlertCount,
+                        priorityName(receipt.originalPriority)
+                    ))
+                    if receipt.selectedProtocol != .visualTransfer {
+                        Text(formatted(
+                            "Deterministic changes: %d removed · %d replaced",
+                            receipt.removedElementCount,
+                            receipt.replacedElementCount
+                        ))
+                    }
+                    Text(formatted(
+                        "Remaining alerts: %d · highest severity: %@",
+                        receipt.remainingAlertCount,
+                        priorityName(receipt.remainingPriority)
+                    ))
+                    Text(receipt.wasAutomaticCleaningSkipped
+                        ? localized("Automatic cleaning skipped: yes")
+                        : localized("Automatic cleaning skipped: no"))
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            }
+            .font(.caption)
+        }
+        .padding(10)
+        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9)
+                .stroke(color.opacity(0.35), lineWidth: 1)
+        }
+    }
+
+    private func cleanReceiptVerdictText(
+        _ verdict: ClipboardCleanReceiptVerdict
+    ) -> String {
+        switch verdict {
+        case .noSupportedRiskRemains:
+            localized("Clean Receipt: no supported cleaning risks remain")
+        case .cleanedSourceNeedsReview:
+            localized("Clean Receipt: cleaned, but review the source")
+        case .riskRemainsDoNotShare:
+            localized("Clean Receipt: risk remains — do not share")
+        }
+    }
+
+    private func receiptIcon(_ verdict: ClipboardCleanReceiptVerdict) -> String {
+        switch verdict {
+        case .noSupportedRiskRemains:
+            "checkmark.shield.fill"
+        case .cleanedSourceNeedsReview:
+            "shield.lefthalf.filled"
+        case .riskRemainsDoNotShare:
+            "xmark.shield.fill"
+        }
+    }
+
+    private func receiptColor(_ verdict: ClipboardCleanReceiptVerdict) -> Color {
+        switch verdict {
+        case .noSupportedRiskRemains:
+            .green
+        case .cleanedSourceNeedsReview:
+            .orange
+        case .riskRemainsDoNotShare:
+            .red
+        }
+    }
+
+    private func protocolName(_ selection: ClipboardAutomationProtocol) -> String {
+        switch selection {
+        case .reviewAll:
+            localized("Review all enabled warnings")
+        case .safeClean:
+            localized("Safe Clean")
+        case .strictClean:
+            localized("Strict Clean")
+        case .visualTransfer:
+            localized("Visual Transfer")
+        }
+    }
+
+    private func priorityName(_ priority: ClipboardAlertPriority) -> String {
+        switch priority {
+        case .standard:
+            localized("standard")
+        case .elevated:
+            localized("elevated")
+        case .high:
+            localized("high")
         }
     }
 

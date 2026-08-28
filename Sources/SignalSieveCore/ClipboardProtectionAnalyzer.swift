@@ -64,6 +64,24 @@ public struct ClipboardProtectionAnalysis: Sendable, Equatable {
             && recentPatternReport.sampleCount == 3
             && recentPatternReport.hasSuspiciousRepetition
     }
+
+    public var cleanReceiptAlertCount: Int {
+        hiddenTextFindingCount
+            + codeAnalysis.findings.count
+            + (binaryAnalysis.isDetected ? 1 : 0)
+            + linkCleaning.linksFlagged
+            + identifierAnalysis.findings.count
+            + (scamAnalysis.isPotentialScam ? scamAnalysis.signals.count : 0)
+    }
+
+    public var cleanReceiptPriority: ClipboardAlertPriority {
+        ClipboardProtectionAnalyzer.alertPriority(
+            hiddenUnicodeRisk: hiddenTextRiskLevel,
+            codeRisk: codeAnalysis.highestRiskLevel,
+            scamThreat: scamAnalysis.isPotentialScam ? scamAnalysis.threatLevel : nil,
+            hasElevatedSignal: linkCleaning.hasTrackingRisk
+        )
+    }
 }
 
 public enum ClipboardProtectionAnalyzer {

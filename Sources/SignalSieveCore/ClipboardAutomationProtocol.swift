@@ -83,6 +83,25 @@ public enum ClipboardAutomationSkipReason: String, Sendable, Equatable {
     case nonTextRepresentation
     case privacySensitiveClipboard
     case inputTooLarge
+    case visualTransferIntegrityCheckFailed
+    case visualTransferFailed
+
+    public var receiptLabel: String {
+        switch self {
+        case .sourceCode:
+            "source code"
+        case .nonTextRepresentation:
+            "file or image representation"
+        case .privacySensitiveClipboard:
+            "privacy-sensitive clipboard type"
+        case .inputTooLarge:
+            "input too large"
+        case .visualTransferIntegrityCheckFailed:
+            "OCR integrity check failed"
+        case .visualTransferFailed:
+            "local OCR failed"
+        }
+    }
 }
 
 public enum ClipboardAutomaticCleaningOutcome: Sendable, Equatable {
@@ -93,11 +112,68 @@ public enum ClipboardAutomaticCleaningOutcome: Sendable, Equatable {
     case skipped
 }
 
-/// Evidence retained in session memory after automatic Safe or Strict Clean.
-/// Counts come from deterministic reanalysis of the original and final text;
-/// they are not an assertion that the source itself is trustworthy.
+public enum ClipboardCleanReceiptVerdict: Sendable, Equatable {
+    case noSupportedRiskRemains
+    case cleanedSourceNeedsReview
+    case riskRemainsDoNotShare
+}
+
+/// Content-free evidence for the automatic cleaning decision. It records only
+/// bounded counts, severities, the selected protocol, and a short reason so it
+/// can be shown or stored in session memory without retaining more copied text.
+public struct ClipboardCleanReceipt: Sendable, Equatable {
+    public static let maximumReasonCharacters = 96
+
+    public let selectedProtocol: ClipboardAutomationProtocol
+    public let verdict: ClipboardCleanReceiptVerdict
+    public let originalAlertCount: Int
+    public let originalPriority: ClipboardAlertPriority
+    public let removedElementCount: Int
+    public let replacedElementCount: Int
+    public let remainingAlertCount: Int
+    public let remainingPriority: ClipboardAlertPriority
+    public let wasAutomaticCleaningSkipped: Bool
+    public let reason: String
+
+    public init(
+        selectedProtocol: ClipboardAutomationProtocol,
+        verdict: ClipboardCleanReceiptVerdict,
+        originalAlertCount: Int,
+        originalPriority: ClipboardAlertPriority,
+        removedElementCount: Int,
+        replacedElementCount: Int,
+        remainingAlertCount: Int,
+        remainingPriority: ClipboardAlertPriority,
+        wasAutomaticCleaningSkipped: Bool,
+        reason: String
+    ) {
+        self.selectedProtocol = selectedProtocol
+        self.verdict = verdict
+        self.originalAlertCount = max(0, originalAlertCount)
+        self.originalPriority = originalPriority
+        self.removedElementCount = max(0, removedElementCount)
+        self.replacedElementCount = max(0, replacedElementCount)
+        self.remainingAlertCount = max(0, remainingAlertCount)
+        self.remainingPriority = remainingPriority
+        self.wasAutomaticCleaningSkipped = wasAutomaticCleaningSkipped
+        self.reason = Self.boundedReason(reason)
+    }
+
+    private static func boundedReason(_ reason: String) -> String {
+        let flattened = reason
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard flattened.count > maximumReasonCharacters else { return flattened }
+        return String(flattened.prefix(maximumReasonCharacters - 1)) + "…"
+    }
+}
+
+/// Evidence retained in session memory after an automatic cleaning protocol.
+/// Counts come from local reanalysis of the original and final text; they are
+/// not an assertion that the source itself is trustworthy or generally safe.
 public struct ClipboardAutomaticCleaningAudit: Sendable, Equatable {
-    public let mode: CleaningMode
+    public let selectedProtocol: ClipboardAutomationProtocol
     public let didWriteCleanedText: Bool
     public let removedElementCount: Int
     public let replacedElementCount: Int
@@ -107,8 +183,11 @@ public struct ClipboardAutomaticCleaningAudit: Sendable, Equatable {
     public let remainingPriority: ClipboardAlertPriority
     public let skipReason: ClipboardAutomationSkipReason?
 
+    public var mode: CleaningMode? { selectedProtocol.cleaningMode }
+
     public init(
         mode: CleaningMode,
+        selectedProtocol: ClipboardAutomationProtocol? = nil,
         didWriteCleanedText: Bool,
         removedElementCount: Int,
         replacedElementCount: Int,
@@ -118,7 +197,30 @@ public struct ClipboardAutomaticCleaningAudit: Sendable, Equatable {
         remainingPriority: ClipboardAlertPriority,
         skipReason: ClipboardAutomationSkipReason? = nil
     ) {
-        self.mode = mode
+        self.selectedProtocol = selectedProtocol
+            ?? (mode == .strict ? .strictClean : .safeClean)
+        self.didWriteCleanedText = didWriteCleanedText
+        self.removedElementCount = max(0, removedElementCount)
+        self.replacedElementCount = max(0, replacedElementCount)
+        self.originalAlertCount = max(0, originalAlertCount)
+        self.remainingAlertCount = max(0, remainingAlertCount)
+        self.originalPriority = originalPriority
+        self.remainingPriority = remainingPriority
+        self.skipReason = skipReason
+    }
+
+    public init(
+        selectedProtocol: ClipboardAutomationProtocol,
+        didWriteCleanedText: Bool,
+        removedElementCount: Int,
+        replacedElementCount: Int,
+        originalAlertCount: Int,
+        remainingAlertCount: Int,
+        originalPriority: ClipboardAlertPriority,
+        remainingPriority: ClipboardAlertPriority,
+        skipReason: ClipboardAutomationSkipReason? = nil
+    ) {
+        self.selectedProtocol = selectedProtocol
         self.didWriteCleanedText = didWriteCleanedText
         self.removedElementCount = max(0, removedElementCount)
         self.replacedElementCount = max(0, replacedElementCount)
@@ -148,7 +250,51 @@ public struct ClipboardAutomaticCleaningAudit: Sendable, Equatable {
     }
 
     public var redRiskRemains: Bool {
-        originalPriority == .high && remainingPriority == .high
+        remainingPriority == .high
+    }
+
+    public var receipt: ClipboardCleanReceipt {
+        ClipboardCleanReceipt(
+            selectedProtocol: selectedProtocol,
+            verdict: receiptVerdict,
+            originalAlertCount: originalAlertCount,
+            originalPriority: originalPriority,
+            removedElementCount: removedElementCount,
+            replacedElementCount: replacedElementCount,
+            remainingAlertCount: remainingAlertCount,
+            remainingPriority: remainingPriority,
+            wasAutomaticCleaningSkipped: skipReason != nil,
+            reason: receiptReason
+        )
+    }
+
+    private var receiptVerdict: ClipboardCleanReceiptVerdict {
+        if remainingPriority == .high {
+            return .riskRemainsDoNotShare
+        }
+        if skipReason != nil || remainingAlertCount > 0 || originalPriority == .high {
+            return .cleanedSourceNeedsReview
+        }
+        return .noSupportedRiskRemains
+    }
+
+    private var receiptReason: String {
+        if let skipReason {
+            return "Automatic cleaning skipped: \(skipReason.receiptLabel)."
+        }
+        if remainingPriority == .high {
+            return "High-risk finding remained after reanalysis."
+        }
+        if originalPriority == .high {
+            return "High-risk finding was removed; review the source."
+        }
+        if remainingAlertCount > 0 {
+            return "Lower-risk findings remain after reanalysis."
+        }
+        if originalAlertCount == 0 {
+            return "No supported cleaning risks were detected."
+        }
+        return "No supported cleaning risks remain after reanalysis."
     }
 }
 
@@ -208,6 +354,13 @@ public enum ClipboardAutomationPolicy {
         selection == .strictClean
             && hasRichTextRepresentation
             && skipReason == nil
+    }
+
+    public static func shouldQuarantineAutomaticReplacement(
+        candidatePriority: ClipboardAlertPriority,
+        skipReason: ClipboardAutomationSkipReason?
+    ) -> Bool {
+        skipReason == nil && candidatePriority == .high
     }
 
     /// Automatic OCR is lossy. Reject candidates that alter values for which
