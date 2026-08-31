@@ -65,6 +65,23 @@ public issue. Provide the smallest synthetic reproduction possible.
   deterministic safe transformations are applied. Confusable identifiers and
   encoded payloads remain review-only. Supported metadata/provenance findings
   are included in the folder report but are never rewritten by Vaccine.
+- Folder Triage reuses Vaccine's local bounded enumeration and analyzers to
+  classify assessed regular files as green, yellow, orange, or red from the
+  strongest supported evidence. Skipped, unreadable, symlink, root-escape,
+  oversized, unsupported binary, and unassessed files remain a separate report
+  category and are never promoted to green. Red is a review severity only; it
+  must not be described as proof of malware, authorship, intent, compromise, or
+  provider origin.
+- Finder marking in Folder Triage is an explicit post-report operation limited
+  to current red findings. Immediately before each Finder metadata mutation or
+  restoration, Signal Sieve revalidates that the path is a regular non-symlink
+  descendant and still matches the identity captured during scanning. The app
+  uses its own marker tag, preserves unrelated Finder tags, records prior label
+  state in a bounded local undo manifest before mutation, reports partial and
+  blocked outcomes, refuses a matching tag that it cannot prove it owns, removes
+  only its own marker during restoration, preserves later user metadata, and
+  never rewrites document content. Manifest decoding and Finder writes are both
+  bounded and verified; malformed manifests fail closed.
 - Self-vaccination is rejected in the core engine as well as the interface;
   Signal Sieve's own security fixtures may intentionally contain attack data.
 - Vaccine has no supported non-GUI CLI or SARIF output in this release. CI

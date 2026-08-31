@@ -148,6 +148,11 @@ struct GlossaryView: View {
             systemImage: "syringe.fill"
         ),
         GlossaryEntry(
+            term: "Folder Triage",
+            definition: "Scans a selected folder locally, reports green through red review severity, and can explicitly add or restore app-owned Finder markers without rewriting documents.",
+            systemImage: "folder.badge.gearshape"
+        ),
+        GlossaryEntry(
             term: "Signature Hunt",
             definition: "Searches files for a selected suspicious signature and reports where it appears before any change is made.",
             systemImage: "scope"

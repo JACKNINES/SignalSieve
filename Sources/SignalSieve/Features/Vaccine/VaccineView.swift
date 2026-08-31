@@ -109,6 +109,14 @@ struct VaccineView: View {
 
             if let report {
                 summary(report)
+                if report.omittedFindingCount > 0 {
+                    Label(
+                        formatted("%d detailed file finding(s) were omitted by the inventory limit.", report.omittedFindingCount),
+                        systemImage: "list.bullet.clipboard"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                }
                 if report.isSignalSieveTarget {
                     selfVaccinationWarning
                 }

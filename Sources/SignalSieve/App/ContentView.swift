@@ -8,6 +8,7 @@ struct ContentView: View {
     @ObservedObject var model: SignalSieveViewModel
     @State private var showsPrivateRules = false
     @State private var showsVaccine = false
+    @State private var showsFolderTriage = false
     @State private var showsSignatureHunt = false
     @State private var showsClipboardHistory = false
     @State private var showsReveal = false
@@ -115,6 +116,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showsVaccine) {
             VaccineView(language: model.language, onCopy: model.copyFindingText)
+        }
+        .sheet(isPresented: $showsFolderTriage) {
+            FolderTriageView(language: model.language, onCopy: model.copyFindingText)
         }
         .sheet(isPresented: $showsSignatureHunt) {
             SignatureHuntView(language: model.language, onCopy: model.copyFindingText)
@@ -469,6 +473,10 @@ struct ContentView: View {
     private var analyzeControls: some View {
         Button(model.localized("Vaccine"), systemImage: "syringe.fill") {
             showsVaccine = true
+        }
+        .sieveToolbarButton()
+        Button(model.localized("Folder Triage"), systemImage: "folder.badge.gearshape") {
+            showsFolderTriage = true
         }
         .sieveToolbarButton()
         Button(model.localized("Signature Hunt"), systemImage: "scope") {

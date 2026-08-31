@@ -390,6 +390,23 @@ they contain no real account, organization, or third-party message data.
   review. Symlinks, binary files, oversized files, generated build output, and
   common dependency directories are never rewritten. Files changed after the
   scan are skipped to avoid overwriting concurrent work.
+- **Folder Triage:** reachable from **Analyze**, runs a recursive local scan of
+  a user-selected folder using Vaccine's bounded enumeration and analyzers, and
+  assigns each assessed regular file a green/yellow/orange/red review severity.
+  Skipped, unreadable, symlink, oversized, unsupported binary, and unassessed
+  files are reported separately instead of being treated as green. Red means
+  the strongest supported evidence is high-risk and needs review; it is **not**
+  a malware verdict, authorship claim, or proof of compromise.
+- Folder Triage is report-only by default. **Reveal in Finder** is local and
+  user initiated. **Apply Red Finder Markers** is a separate explicit action
+  that revalidates every red file as the same regular non-symlink descendant
+  before mutating Finder metadata. Signal Sieve adds an app-owned Finder tag and
+  a red Finder label, preserves unrelated tags, stores prior label state in a
+  bounded local undo manifest before mutation, reports partial and blocked
+  outcomes, and never rewrites document content. A preexisting tag with the same
+  name but no matching manifest is left untouched as an ownership conflict.
+  **Restore Markers** removes only Signal Sieve's marker, preserves tags added
+  later, and restores prior labels when the recorded file identity still matches.
 - Vaccine makes invisible findings reviewable with a bounded source fragment.
   It decodes recognizable Unicode Tag, variation-selector byte, and zero-width
   binary payloads into display-only text; unknown encodings are rendered in
@@ -667,6 +684,12 @@ interlinear annotations, language tags, Hangul fillers, Arabic/Syriac/Kaithi
 orthographic controls, Tibetan joiners, CJK variation selectors, and existing
 emoji/tag sequences. A release gate must prove that Safe Clean removes the
 floating carriers while preserving the functional fixtures.
+
+Folder Triage coverage lives in `FolderTriageEngineTests` and uses synthetic
+temporary fixtures only. It exercises high/medium/benign severity assignment,
+metadata-only yellow classification, symlink/root-escape skips, change-after-scan
+refusals, preservation and restoration of existing Finder tags/labels, partial
+marker failures, manifest bounds, and restoration ownership.
 
 ## Project structure
 

@@ -88,6 +88,7 @@ swiftc \
     "$PROJECT_ROOT/Sources/SignalSieveCore/FileMetadataCleaner.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/FileProvenanceAnalyzer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/FindingReportFormatter.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/FolderTriageEngine.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/HiddenTextAnalyzer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/InputResultAutomation.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/InvisibleFragmentRevealer.swift" \
@@ -180,6 +181,7 @@ swiftc \
     "$PROJECT_ROOT/Sources/SignalSieve/Features/Reveal/RevealView.swift" \
     "$PROJECT_ROOT/Sources/SignalSieve/Features/Reveal/CovertChannelView.swift" \
     "$PROJECT_ROOT/Sources/SignalSieve/Features/Rules/PrivateRulesView.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieve/Features/Vaccine/FolderTriageView.swift" \
     "$PROJECT_ROOT/Sources/SignalSieve/Features/Vaccine/SignatureHuntView.swift" \
     "$PROJECT_ROOT/Sources/SignalSieve/Features/Vaccine/VaccineView.swift" \
     "$PROJECT_ROOT/Sources/SignalSieve/Platform/ApplicationIconController.swift" \

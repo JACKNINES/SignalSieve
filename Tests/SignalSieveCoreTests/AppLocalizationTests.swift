@@ -223,7 +223,28 @@ func translatesPrimaryInterfaceText() {
         "Outside clipboard scope",
         "Copy Link Report",
         "Opaque redirect or short link detected",
-        "Review Link Report"
+        "Review Link Report",
+        "Folder Triage",
+        "Apply Red Finder Markers",
+        "Restore Markers",
+        "Copy Triage Report",
+        "Signal Sieve — Folder Triage Report",
+        "Green: %d · Yellow: %d · Orange: %d · Red: %d · Unassessed: %d",
+        "Reveal in Finder",
+        "Red is a review marker, not a malware verdict.",
+        "Skipped or unassessed files",
+        "Symlink or nonregular file",
+        "Unsupported binary content",
+        "Detailed findings omitted",
+        "%d detailed file finding(s) were omitted by the inventory limit.",
+        "Changed since scan",
+        "Manifest limit",
+        "Marker ownership conflict",
+        "Marker outcomes: %d applied, %d restored, %d changed, %d blocked, %d failed.",
+        "High-risk code evidence detected.",
+        "High-risk Unicode evidence detected.",
+        "Container structure anomaly detected.",
+        "Metadata evidence detected."
     ]
     for key in popupKeys {
         #expect(AppLocalization.hasTranslation(key, language: .spanish))

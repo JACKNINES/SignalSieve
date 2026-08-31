@@ -13,6 +13,75 @@ public struct VaccineChangePreview: Sendable, Equatable {
     }
 }
 
+public struct VaccineFileIdentity: Sendable, Codable, Equatable {
+    public let systemNumber: UInt64?
+    public let fileNumber: UInt64?
+    public let fileSize: UInt64
+    public let modificationTime: TimeInterval?
+    public let fingerprint: UInt64
+
+    public init(
+        systemNumber: UInt64?,
+        fileNumber: UInt64?,
+        fileSize: UInt64,
+        modificationTime: TimeInterval?,
+        fingerprint: UInt64
+    ) {
+        self.systemNumber = systemNumber
+        self.fileNumber = fileNumber
+        self.fileSize = fileSize
+        self.modificationTime = modificationTime
+        self.fingerprint = fingerprint
+    }
+}
+
+public enum VaccineSkippedReason: String, Sendable, Codable, Equatable {
+    case symlinkOrNonRegular = "Symlink or nonregular file"
+    case oversized = "File exceeds bounded scan size"
+    case unreadable = "File could not be read"
+    case unsupportedBinary = "Unsupported binary content"
+    case enumerationFailed = "Directory entry could not be enumerated"
+}
+
+public struct VaccineSkippedFile: Identifiable, Sendable, Codable, Equatable {
+    public let id: String
+    public let relativePath: String
+    public let reason: VaccineSkippedReason
+
+    public init(relativePath: String, reason: VaccineSkippedReason) {
+        self.id = "\(relativePath):\(reason.rawValue)"
+        self.relativePath = relativePath
+        self.reason = reason
+    }
+}
+
+public struct VaccineAssessedFile: Identifiable, Sendable, Equatable {
+    public let id: String
+    public let fileURL: URL
+    public let relativePath: String
+    public let detectedLanguage: String?
+    public let isTextFile: Bool
+    public let provenanceReport: FileProvenanceReport?
+    public let identity: VaccineFileIdentity
+
+    public init(
+        fileURL: URL,
+        relativePath: String,
+        detectedLanguage: String?,
+        isTextFile: Bool,
+        provenanceReport: FileProvenanceReport?,
+        identity: VaccineFileIdentity
+    ) {
+        self.id = relativePath
+        self.fileURL = fileURL
+        self.relativePath = relativePath
+        self.detectedLanguage = detectedLanguage
+        self.isTextFile = isTextFile
+        self.provenanceReport = provenanceReport
+        self.identity = identity
+    }
+}
+
 public struct VaccineFileFinding: Identifiable, Sendable, Equatable {
     public let id: String
     public let fileURL: URL
@@ -31,6 +100,11 @@ public struct VaccineFileFinding: Identifiable, Sendable, Equatable {
     public let provenanceReport: FileProvenanceReport?
     public let changePreview: VaccineChangePreview?
     public let fingerprint: UInt64
+    public let identity: VaccineFileIdentity?
+    /// Aggregate risk survives bounded evidence lists so a late high-risk
+    /// scalar cannot be hidden behind thousands of lower-risk findings.
+    public let highestCodeRiskLevel: HiddenElementRiskLevel?
+    public let highestHiddenRiskLevel: HiddenElementRiskLevel?
 
     public init(
         fileURL: URL,
@@ -48,7 +122,10 @@ public struct VaccineFileFinding: Identifiable, Sendable, Equatable {
         isTextFile: Bool = true,
         provenanceReport: FileProvenanceReport? = nil,
         changePreview: VaccineChangePreview?,
-        fingerprint: UInt64
+        fingerprint: UInt64,
+        identity: VaccineFileIdentity? = nil,
+        highestCodeRiskLevel: HiddenElementRiskLevel? = nil,
+        highestHiddenRiskLevel: HiddenElementRiskLevel? = nil
     ) {
         self.id = relativePath
         self.fileURL = fileURL
@@ -67,6 +144,11 @@ public struct VaccineFileFinding: Identifiable, Sendable, Equatable {
         self.provenanceReport = provenanceReport
         self.changePreview = changePreview
         self.fingerprint = fingerprint
+        self.identity = identity
+        self.highestCodeRiskLevel = highestCodeRiskLevel
+            ?? codeFindings.map(\.kind.riskLevel).max { $0.rawValue < $1.rawValue }
+        self.highestHiddenRiskLevel = highestHiddenRiskLevel
+            ?? hiddenFindings.map(\.riskLevel).max { $0.rawValue < $1.rawValue }
     }
 }
 
@@ -80,6 +162,11 @@ public struct VaccineScanReport: Sendable, Equatable {
     public let ignoredPathCount: Int
     public let isSignalSieveTarget: Bool
     public let findings: [VaccineFileFinding]
+    public let assessedFiles: [VaccineAssessedFile]
+    public let unassessedFiles: [VaccineSkippedFile]
+    public let omittedAssessedFileCount: Int
+    public let omittedUnassessedFileCount: Int
+    public let omittedFindingCount: Int
 
     public init(
         rootURL: URL,
@@ -90,7 +177,12 @@ public struct VaccineScanReport: Sendable, Equatable {
         excludedDirectoryCount: Int,
         ignoredPathCount: Int,
         isSignalSieveTarget: Bool,
-        findings: [VaccineFileFinding]
+        findings: [VaccineFileFinding],
+        assessedFiles: [VaccineAssessedFile] = [],
+        unassessedFiles: [VaccineSkippedFile] = [],
+        omittedAssessedFileCount: Int = 0,
+        omittedUnassessedFileCount: Int = 0,
+        omittedFindingCount: Int = 0
     ) {
         self.rootURL = rootURL
         self.scannedFileCount = scannedFileCount
@@ -101,9 +193,14 @@ public struct VaccineScanReport: Sendable, Equatable {
         self.ignoredPathCount = ignoredPathCount
         self.isSignalSieveTarget = isSignalSieveTarget
         self.findings = findings
+        self.assessedFiles = assessedFiles
+        self.unassessedFiles = unassessedFiles
+        self.omittedAssessedFileCount = max(0, omittedAssessedFileCount)
+        self.omittedUnassessedFileCount = max(0, omittedUnassessedFileCount)
+        self.omittedFindingCount = max(0, omittedFindingCount)
     }
 
-    public var affectedFileCount: Int { findings.count }
+    public var affectedFileCount: Int { findings.count + omittedFindingCount }
     public var sanitizableFileCount: Int {
         findings.filter { $0.sanitizableFindingCount > 0 }.count
     }
@@ -160,6 +257,7 @@ public enum VaccineError: LocalizedError {
 
 public enum VaccineEngine {
     public static let maximumFileSize = 5 * 1_024 * 1_024
+    public static let maximumInventoryEntries = 10_000
     public static let provenanceFileExtensions: Set<String> = [
         "png", "jpg", "jpeg", "svg", "pdf", "docx", "odt",
         "html", "htm", "md", "markdown"
@@ -211,12 +309,22 @@ public enum VaccineEngine {
             .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey
         ]
         var enumerationErrorCount = 0
+        var unassessedFiles: [VaccineSkippedFile] = []
+        var omittedUnassessedFileCount = 0
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: keys,
             options: [.skipsPackageDescendants],
-            errorHandler: { _, _ in
+            errorHandler: { url, _ in
                 enumerationErrorCount += 1
+                if unassessedFiles.count < maximumInventoryEntries {
+                    unassessedFiles.append(VaccineSkippedFile(
+                        relativePath: relativePath(of: url, under: root),
+                        reason: .enumerationFailed
+                    ))
+                } else {
+                    omittedUnassessedFileCount += 1
+                }
                 return true
             }
         ) else { throw VaccineError.cannotEnumerate }
@@ -228,6 +336,33 @@ public enum VaccineEngine {
         var excludedDirectories = 0
         var ignoredPaths = 0
         var findings: [VaccineFileFinding] = []
+        var omittedFindingCount = 0
+        var assessedFiles: [VaccineAssessedFile] = []
+        var omittedAssessedFileCount = 0
+
+        func appendAssessed(_ file: VaccineAssessedFile) {
+            if assessedFiles.count < maximumInventoryEntries {
+                assessedFiles.append(file)
+            } else {
+                omittedAssessedFileCount += 1
+            }
+        }
+
+        func appendUnassessed(_ file: VaccineSkippedFile) {
+            if unassessedFiles.count < maximumInventoryEntries {
+                unassessedFiles.append(file)
+            } else {
+                omittedUnassessedFileCount += 1
+            }
+        }
+
+        func appendFinding(_ finding: VaccineFileFinding) {
+            if findings.count < maximumInventoryEntries {
+                findings.append(finding)
+            } else {
+                omittedFindingCount += 1
+            }
+        }
 
         for case let fileURL as URL in enumerator {
             let values = try? fileURL.resourceValues(forKeys: Set(keys))
@@ -250,6 +385,10 @@ public enum VaccineEngine {
             }
             guard values?.isRegularFile == true, values?.isSymbolicLink != true else {
                 skipped += 1
+                appendUnassessed(VaccineSkippedFile(
+                    relativePath: relativePath,
+                    reason: .symlinkOrNonRegular
+                ))
                 continue
             }
             let fileSize = values?.fileSize ?? 0
@@ -262,16 +401,36 @@ public enum VaccineEngine {
                    fileSize <= FileProvenanceAnalyzer.maximumScanBytes,
                    let provenance = try? FileProvenanceAnalyzer.analyze(url: fileURL) {
                     provenanceScanned += 1
+                    let identity = fileIdentity(
+                        for: fileURL,
+                        fingerprint: 0,
+                        fallbackSize: UInt64(fileSize)
+                    )
+                    if let identity {
+                        appendAssessed(VaccineAssessedFile(
+                            fileURL: fileURL,
+                            relativePath: relativePath,
+                            detectedLanguage: nil,
+                            isTextFile: false,
+                            provenanceReport: provenance.findings.isEmpty ? nil : provenance,
+                            identity: identity
+                        ))
+                    }
                     if !provenance.findings.isEmpty {
-                        findings.append(metadataOnlyFinding(
+                        appendFinding(metadataOnlyFinding(
                             fileURL: fileURL,
                             relativePath: relativePath,
                             provenance: provenance,
-                            fingerprint: 0
+                            fingerprint: 0,
+                            identity: identity
                         ))
                     }
                 }
                 skipped += 1
+                appendUnassessed(VaccineSkippedFile(
+                    relativePath: relativePath,
+                    reason: .oversized
+                ))
                 continue
             }
 
@@ -279,12 +438,26 @@ public enum VaccineEngine {
             do { data = try Data(contentsOf: fileURL, options: [.mappedIfSafe]) }
             catch {
                 skipped += 1
+                appendUnassessed(VaccineSkippedFile(
+                    relativePath: relativePath,
+                    reason: .unreadable
+                ))
                 continue
             }
             guard data.count <= maximumFileSize else {
                 skipped += 1
+                appendUnassessed(VaccineSkippedFile(
+                    relativePath: relativePath,
+                    reason: .oversized
+                ))
                 continue
             }
+            let dataFingerprint = fingerprint(data)
+            let identity = fileIdentity(
+                for: fileURL,
+                fingerprint: dataFingerprint,
+                fallbackSize: UInt64(data.count)
+            )
 
             var provenanceReport: FileProvenanceReport?
             if shouldInspectProvenance {
@@ -301,38 +474,83 @@ public enum VaccineEngine {
             let rawBinary = BinaryContentDetector.analyze(data)
             if rawBinary.kind == .rawBinary, rawBinary.evidence.contains("signature") {
                 binary += 1
+                if let identity {
+                    appendAssessed(VaccineAssessedFile(
+                        fileURL: fileURL,
+                        relativePath: relativePath,
+                        detectedLanguage: nil,
+                        isTextFile: false,
+                        provenanceReport: provenanceReport,
+                        identity: identity
+                    ))
+                }
                 if let provenanceReport {
-                    findings.append(metadataOnlyFinding(
+                    appendFinding(metadataOnlyFinding(
                         fileURL: fileURL,
                         relativePath: relativePath,
                         provenance: provenanceReport,
-                        fingerprint: fingerprint(data)
+                        fingerprint: dataFingerprint,
+                        identity: identity
                     ))
                 }
+                appendUnassessed(VaccineSkippedFile(
+                    relativePath: relativePath,
+                    reason: .unsupportedBinary
+                ))
                 continue
             }
             guard let decodedFile = TextEncodingDetector.decode(data) else {
                 binary += 1
+                if let identity {
+                    appendAssessed(VaccineAssessedFile(
+                        fileURL: fileURL,
+                        relativePath: relativePath,
+                        detectedLanguage: nil,
+                        isTextFile: false,
+                        provenanceReport: provenanceReport,
+                        identity: identity
+                    ))
+                }
                 if let provenanceReport {
-                    findings.append(metadataOnlyFinding(
+                    appendFinding(metadataOnlyFinding(
                         fileURL: fileURL,
                         relativePath: relativePath,
                         provenance: provenanceReport,
-                        fingerprint: fingerprint(data)
+                        fingerprint: dataFingerprint,
+                        identity: identity
                     ))
                 }
+                appendUnassessed(VaccineSkippedFile(
+                    relativePath: relativePath,
+                    reason: .unsupportedBinary
+                ))
                 continue
             }
             if rawBinary.kind == .rawBinary, decodedFile.encoding == .utf8 {
                 binary += 1
+                if let identity {
+                    appendAssessed(VaccineAssessedFile(
+                        fileURL: fileURL,
+                        relativePath: relativePath,
+                        detectedLanguage: nil,
+                        isTextFile: false,
+                        provenanceReport: provenanceReport,
+                        identity: identity
+                    ))
+                }
                 if let provenanceReport {
-                    findings.append(metadataOnlyFinding(
+                    appendFinding(metadataOnlyFinding(
                         fileURL: fileURL,
                         relativePath: relativePath,
                         provenance: provenanceReport,
-                        fingerprint: fingerprint(data)
+                        fingerprint: dataFingerprint,
+                        identity: identity
                     ))
                 }
+                appendUnassessed(VaccineSkippedFile(
+                    relativePath: relativePath,
+                    reason: .unsupportedBinary
+                ))
                 continue
             }
             let text = decodedFile.text
@@ -356,7 +574,7 @@ public enum VaccineEngine {
             let hiddenFindings = inspection.findings
             let unicodeCount = codeAnalysis.isLikelyCode
                 ? codeAnalysis.findings.count
-                : hiddenFindings.count
+                : inspection.totalFindingCount
             let reviewOnly = max(0, unicodeCount - sanitizable)
                 + (provenanceReport?.findings.count ?? 0)
 
@@ -372,8 +590,19 @@ public enum VaccineEngine {
                 detectedLanguage = codeAnalysis.isLikelyCode ? codeAnalysis.detectedLanguage : nil
             }
 
+            if let identity {
+                appendAssessed(VaccineAssessedFile(
+                    fileURL: fileURL,
+                    relativePath: relativePath,
+                    detectedLanguage: detectedLanguage,
+                    isTextFile: true,
+                    provenanceReport: provenanceReport,
+                    identity: identity
+                ))
+            }
+
             guard unicodeCount > 0 || encoded.isDetected || provenanceReport != nil else { continue }
-            findings.append(VaccineFileFinding(
+            appendFinding(VaccineFileFinding(
                 fileURL: fileURL,
                 relativePath: relativePath,
                 detectedLanguage: detectedLanguage,
@@ -390,7 +619,12 @@ public enum VaccineEngine {
                 changePreview: cleaned.text == text
                     ? nil
                     : changePreview(before: text, after: cleaned.text),
-                fingerprint: fingerprint(data)
+                fingerprint: dataFingerprint,
+                identity: identity,
+                highestCodeRiskLevel: codeAnalysis.isLikelyCode
+                    ? codeAnalysis.highestRiskLevel
+                    : nil,
+                highestHiddenRiskLevel: inspection.highestRiskLevel
             ))
         }
 
@@ -403,7 +637,12 @@ public enum VaccineEngine {
             excludedDirectoryCount: excludedDirectories,
             ignoredPathCount: ignoredPaths,
             isSignalSieveTarget: selfTarget,
-            findings: findings.sorted { $0.relativePath < $1.relativePath }
+            findings: findings.sorted { $0.relativePath < $1.relativePath },
+            assessedFiles: assessedFiles.sorted { $0.relativePath < $1.relativePath },
+            unassessedFiles: unassessedFiles.sorted { $0.relativePath < $1.relativePath },
+            omittedAssessedFileCount: omittedAssessedFileCount,
+            omittedUnassessedFileCount: omittedUnassessedFileCount,
+            omittedFindingCount: omittedFindingCount
         )
     }
 
@@ -411,7 +650,8 @@ public enum VaccineEngine {
         fileURL: URL,
         relativePath: String,
         provenance: FileProvenanceReport,
-        fingerprint: UInt64
+        fingerprint: UInt64,
+        identity: VaccineFileIdentity?
     ) -> VaccineFileFinding {
         VaccineFileFinding(
             fileURL: fileURL,
@@ -429,7 +669,8 @@ public enum VaccineEngine {
             isTextFile: false,
             provenanceReport: provenance,
             changePreview: nil,
-            fingerprint: fingerprint
+            fingerprint: fingerprint,
+            identity: identity
         )
     }
 
@@ -574,6 +815,45 @@ public enum VaccineEngine {
         let root = rootURL.standardizedFileURL.path
         let file = fileURL.standardizedFileURL.path
         return file.hasPrefix(root + "/")
+    }
+
+    public static func contentFingerprint(_ data: Data) -> UInt64 {
+        fingerprint(data)
+    }
+
+    private static func fileIdentity(
+        for fileURL: URL,
+        fingerprint: UInt64,
+        fallbackSize: UInt64
+    ) -> VaccineFileIdentity? {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let systemNumber = unsignedAttribute(attributes?[.systemNumber])
+        let fileNumber = unsignedAttribute(attributes?[.systemFileNumber])
+        let fileSize = unsignedAttribute(attributes?[.size]) ?? fallbackSize
+        let modificationTime = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970
+        return VaccineFileIdentity(
+            systemNumber: systemNumber,
+            fileNumber: fileNumber,
+            fileSize: fileSize,
+            modificationTime: modificationTime,
+            fingerprint: fingerprint
+        )
+    }
+
+    private static func unsignedAttribute(_ value: Any?) -> UInt64? {
+        if let number = value as? NSNumber {
+            return number.uint64Value
+        }
+        if let value = value as? UInt64 {
+            return value
+        }
+        if let value = value as? UInt {
+            return UInt64(value)
+        }
+        if let value = value as? Int, value >= 0 {
+            return UInt64(value)
+        }
+        return nil
     }
 
     private static func fingerprint(_ data: Data) -> UInt64 {

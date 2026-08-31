@@ -41,6 +41,15 @@ SignalSieve is designed around local processing and data minimization.
   cleaning always creates and reanalyzes a new file; the source is never
   overwritten. Signed document packages and signed, encrypted, or structurally
   damaged PDFs are refused.
+- Folder Triage scans only a folder explicitly chosen by the user. The recursive
+  report is local and content-free by default: paths, severity, finding
+  categories, counts, skipped/unassessed reasons, and bounded explanations. It
+  does not upload, execute, or rewrite files. If the user explicitly applies red
+  Finder markers, Signal Sieve writes only Finder metadata for revalidated files
+  and first writes a bounded local undo manifest under Application Support. The
+  manifest is capped at 250 entries and 512 KiB and contains the selected root,
+  relative paths, file identity, prior and applied Finder tag/label state, and
+  operation time. It contains no document contents or revealed text.
 - Rewrite Integrity receives only the existing in-memory Input and Result and
   stores no comparison after the app exits. Optional rewriting invokes only an
   already-installed Ollama command and pins its API host to loopback; Signal

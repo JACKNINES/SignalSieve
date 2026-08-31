@@ -28,7 +28,7 @@ public enum FindingReportFormatter {
         _ inspection: TextInspection,
         language: AppLanguage
     ) -> String {
-        report(
+        return report(
             title: localized("Signal Sieve — Hidden Unicode Findings", language),
             summary: countSummary(inspection.totalFindingCount, language),
             entries: inspection.findings.map { hiddenFinding($0, language: language) }
@@ -421,15 +421,23 @@ public enum FindingReportFormatter {
         _ reportValue: VaccineScanReport,
         language: AppLanguage
     ) -> String {
-        report(
+        var summary = [
+            field("Files scanned", String(reportValue.scannedFileCount), language),
+            field("Metadata files scanned", String(reportValue.provenanceScannedFileCount), language),
+            field("Metadata findings", String(reportValue.totalMetadataFindingCount), language),
+            field("Files with findings", String(reportValue.affectedFileCount), language),
+            field("Ignored paths", String(reportValue.ignoredPathCount), language)
+        ]
+        if reportValue.omittedFindingCount > 0 {
+            summary.append(field(
+                "Detailed findings omitted",
+                String(reportValue.omittedFindingCount),
+                language
+            ))
+        }
+        return report(
             title: localized("Signal Sieve — Vaccine Findings", language),
-            summary: [
-                field("Files scanned", String(reportValue.scannedFileCount), language),
-                field("Metadata files scanned", String(reportValue.provenanceScannedFileCount), language),
-                field("Metadata findings", String(reportValue.totalMetadataFindingCount), language),
-                field("Files with findings", String(reportValue.affectedFileCount), language),
-                field("Ignored paths", String(reportValue.ignoredPathCount), language)
-            ].joined(separator: "\n"),
+            summary: summary.joined(separator: "\n"),
             entries: reportValue.findings.map { vaccineFile($0, language: language) }
         )
     }
