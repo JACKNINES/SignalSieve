@@ -29,6 +29,46 @@ private struct AutomaticVisualTransferContext {
     let prepared: ClipboardCoreAnalysis
 }
 
+struct ManualInputInspectionRequest: Sendable {
+    let operationID: UInt64
+    let source: String
+    let customRules: [CustomURLRule]
+    let adaptiveModel: AdaptiveCopyModel
+    let isAdaptiveModelEnabled: Bool
+}
+
+struct ManualInputInspectionCompletion: Sendable {
+    let operationID: UInt64
+    let source: String
+    let analysis: ManualInputInspectionAnalysis
+}
+
+protocol ManualInputInspectionProviding: Sendable {
+    func analyze(_ request: ManualInputInspectionRequest) async -> ManualInputInspectionCompletion?
+}
+
+/// Serializes manual Input inspection away from the main actor. The view model
+/// cancels superseded tasks; the actor checks that cancellation before and
+/// after deterministic core analysis so queued requests do not expand into an
+/// unbounded worker storm.
+actor ManualInputInspectionWorker: ManualInputInspectionProviding {
+    func analyze(_ request: ManualInputInspectionRequest) async -> ManualInputInspectionCompletion? {
+        guard !Task.isCancelled else { return nil }
+        let analysis = ManualInputInspectionAnalyzer.analyze(
+            request.source,
+            customRules: request.customRules,
+            adaptiveModel: request.adaptiveModel,
+            isAdaptiveModelEnabled: request.isAdaptiveModelEnabled
+        )
+        guard !Task.isCancelled else { return nil }
+        return ManualInputInspectionCompletion(
+            operationID: request.operationID,
+            source: request.source,
+            analysis: analysis
+        )
+    }
+}
+
 /// Serializes CPU-heavy clipboard work away from AppKit's main actor. Pending
 /// cancelled requests are discarded before they allocate analysis state, so a
 /// burst of copy events cannot create an unbounded detached-task storm.
@@ -236,7 +276,10 @@ final class SignalSieveViewModel: ObservableObject {
     private let adaptiveModelURL: URL
     private let defaults: UserDefaults
     private let noticePanel = ClipboardNoticePanelController()
+    private let inputInspectionWorker: any ManualInputInspectionProviding
     private var clipboardMonitor: AnyCancellable?
+    private var inputInspectionTask: Task<Void, Never>?
+    private var latestInputInspectionOperationID: UInt64 = 0
     private let clipboardAnalysisWorker = ClipboardAnalysisWorker()
     private var clipboardAnalysisTask: Task<Void, Never>?
     private var automaticVisualTransferTask: Task<Void, Never>?
@@ -288,7 +331,8 @@ final class SignalSieveViewModel: ObservableObject {
     init(
         privateRulesURL: URL? = nil,
         adaptiveModelURL: URL? = nil,
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        inputInspectionWorker: any ManualInputInspectionProviding = ManualInputInspectionWorker()
     ) {
         Self.migrateLegacyExecutablePreferencesIfNeeded(to: defaults)
         let resolvedURL = privateRulesURL ?? Self.defaultPrivateRulesURL()
@@ -298,6 +342,7 @@ final class SignalSieveViewModel: ObservableObject {
         self.adaptiveCopyModel = (try? AdaptiveCopyModelStore.load(from: resolvedAdaptiveURL))
             ?? AdaptiveCopyModel()
         self.defaults = defaults
+        self.inputInspectionWorker = inputInspectionWorker
         self.language = AppLanguage.persistedOrEnglish(
             defaults.string(forKey: PreferenceKey.language)
         )
@@ -505,27 +550,74 @@ final class SignalSieveViewModel: ObservableObject {
     }
 
     func inspect() {
-        if let limitation = TextAnalysisBudget.limitation(for: input) {
-            applyAnalysisLimitation(limitation)
+        inputInspectionTask?.cancel()
+        inputInspectionTask = nil
+        let source = input
+        let operationID = nextInputInspectionOperationID()
+
+        if let limitation = TextAnalysisBudget.limitation(for: source) {
+            let analysis = ManualInputInspectionAnalyzer.limitedAnalysis(
+                limitation,
+                customRules: privateRules,
+                adaptiveSampleCount: adaptiveCopyModel.sampleCount
+            )
+            applyManualInputInspection(
+                analysis,
+                operationID: operationID,
+                source: source
+            )
             return
         }
-        inspection = HiddenTextAnalyzer.inspect(input)
-        covertChannelReport = CovertTextChannelAnalyzer.analyze(input)
-        codeAnalysis = CodeGuardAnalyzer.analyze(input)
-        binaryAnalysis = BinaryContentDetector.analyze(input)
-        identifierAnalysis = OpaqueIdentifierAnalyzer.analyze(input)
-        scamAnalysis = ScamAttemptDetector.analyze(input)
-        linkCleaningReport = URLTrackerCleaner.cleanLinks(in: input, customRules: privateRules)
-        adaptiveAnalysis = isAdaptiveModelEnabled
-            ? adaptiveCopyModel.assess(input)
-            : AdaptiveCopyAnalysis(
-                sampleCountBeforeLearning: adaptiveCopyModel.sampleCount,
-                anomalyScore: 0,
-                deviations: [],
-                wasEligibleForLearning: false
+
+        let request = ManualInputInspectionRequest(
+            operationID: operationID,
+            source: source,
+            customRules: privateRules,
+            adaptiveModel: adaptiveCopyModel,
+            isAdaptiveModelEnabled: isAdaptiveModelEnabled
+        )
+        let worker = inputInspectionWorker
+        inputInspectionTask = Task { [weak self] in
+            guard let completion = await worker.analyze(request),
+                  !Task.isCancelled,
+                  let self else { return }
+            self.applyManualInputInspection(completion)
+        }
+    }
+
+    private func applyManualInputInspection(_ completion: ManualInputInspectionCompletion) {
+        applyManualInputInspection(
+            completion.analysis,
+            operationID: completion.operationID,
+            source: completion.source
+        )
+    }
+
+    private func applyManualInputInspection(
+        _ analysis: ManualInputInspectionAnalysis,
+        operationID: UInt64,
+        source: String
+    ) {
+        guard operationID == latestInputInspectionOperationID,
+              input == source else { return }
+
+        inspection = analysis.inspection
+        covertChannelReport = analysis.covertChannelReport
+        codeAnalysis = analysis.codeAnalysis
+        binaryAnalysis = analysis.binaryAnalysis
+        identifierAnalysis = analysis.identifierAnalysis
+        scamAnalysis = analysis.scamAnalysis
+        linkCleaningReport = analysis.linkCleaningReport
+        adaptiveAnalysis = analysis.adaptiveAnalysis
+        revealedFragments = analysis.revealedFragments
+
+        if let limitation = analysis.limitation {
+            status = formatted(
+                "Analysis stopped at the safety limit: %d UTF-8 bytes exceeds the %d-byte maximum. No safety verdict was produced.",
+                limitation.observedUTF8Bytes,
+                limitation.maximumUTF8Bytes
             )
-        revealedFragments = InvisibleFragmentRevealer.reveal(in: input)
-        if input.isEmpty {
+        } else if source.isEmpty {
             status = localized("Paste text to get started.")
         } else if scamAnalysis.isPotentialScam {
             status = formatted(
@@ -876,26 +968,24 @@ final class SignalSieveViewModel: ObservableObject {
     }
 
     private func applyAnalysisLimitation(_ limitation: TextAnalysisLimitation) {
-        let empty = ClipboardProtectionAnalyzer.analyze("", recentPatternTexts: [])
-        inspection = empty.inspection
-        covertChannelReport = empty.covertChannelReport
-        codeAnalysis = empty.codeAnalysis
-        binaryAnalysis = empty.binaryAnalysis
-        identifierAnalysis = empty.identifierAnalysis
-        scamAnalysis = empty.scamAnalysis
-        linkCleaningReport = empty.linkCleaning
-        adaptiveAnalysis = AdaptiveCopyAnalysis(
-            sampleCountBeforeLearning: adaptiveCopyModel.sampleCount,
-            anomalyScore: 0,
-            deviations: [],
-            wasEligibleForLearning: false
+        inputInspectionTask?.cancel()
+        inputInspectionTask = nil
+        let operationID = nextInputInspectionOperationID()
+        let analysis = ManualInputInspectionAnalyzer.limitedAnalysis(
+            limitation,
+            customRules: privateRules,
+            adaptiveSampleCount: adaptiveCopyModel.sampleCount
         )
-        revealedFragments = []
-        status = formatted(
-            "Analysis stopped at the safety limit: %d UTF-8 bytes exceeds the %d-byte maximum. No safety verdict was produced.",
-            limitation.observedUTF8Bytes,
-            limitation.maximumUTF8Bytes
+        applyManualInputInspection(
+            analysis,
+            operationID: operationID,
+            source: input
         )
+    }
+
+    private func nextInputInspectionOperationID() -> UInt64 {
+        latestInputInspectionOperationID += 1
+        return latestInputInspectionOperationID
     }
 
     private func persistPrivateRules() throws {

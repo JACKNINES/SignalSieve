@@ -45,6 +45,10 @@ let package = Package(
         .testTarget(
             name: "SignalSieveCoreTests",
             dependencies: ["SignalSieveCore"]
+        ),
+        .testTarget(
+            name: "SignalSieveAppTests",
+            dependencies: ["SignalSieve"]
         )
     ]
 )

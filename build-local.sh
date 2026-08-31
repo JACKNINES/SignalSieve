@@ -94,6 +94,7 @@ swiftc \
     "$PROJECT_ROOT/Sources/SignalSieveCore/InvisibleFragmentRevealer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/LocalRewriteEngine.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/LinkSanitizationModels.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/ManualInputInspectionAnalyzer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/OpaqueIdentifierAnalyzer.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/PayloadEquivalenceDetector.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/PDFMetadataSanitizer.swift" \

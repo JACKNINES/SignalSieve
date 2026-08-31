@@ -22,6 +22,7 @@ fi
 
 if ! STANDARD_TEST_COUNT="$(
     awk '/^@Test/ { count += 1 } END { print count + 0 }' \
+        "$PROJECT_ROOT/Tests/SignalSieveAppTests"/*.swift \
         "$PROJECT_ROOT/Tests/SignalSieveCoreTests"/*.swift
 )"; then
     print -u2 "Unable to count Swift Testing declarations."

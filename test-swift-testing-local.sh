@@ -12,6 +12,7 @@ TARGET_ARCH="$(uname -m)"
 # target. This affects only the local test executable, never the macOS 13 app.
 TEST_DEPLOYMENT_TARGET="$TARGET_ARCH-apple-macosx14.0"
 CORE_LIBRARY="$BUILD_DIR/libSignalSieveCore.dylib"
+APP_LIBRARY="$BUILD_DIR/libSignalSieve.dylib"
 PDF_HELPER="$BUILD_DIR/SignalSievePDFSanitizer"
 TEST_EXECUTABLE="$BUILD_DIR/SignalSieveSwiftTestingTests"
 
@@ -68,12 +69,22 @@ for framework_directory in "${TESTING_FRAMEWORK_DIRECTORIES[@]}"; do
 done
 
 NEEDS_TEST_BUILD=false
-if [[ ! -x "$TEST_EXECUTABLE" || "$CORE_LIBRARY" -nt "$TEST_EXECUTABLE" ]]; then
+if [[ ! -x "$TEST_EXECUTABLE" \
+    || ! -r "$APP_LIBRARY" \
+    || "$CORE_LIBRARY" -nt "$TEST_EXECUTABLE" \
+    || "$APP_LIBRARY" -nt "$TEST_EXECUTABLE" ]]; then
     NEEDS_TEST_BUILD=true
 else
     if ! NEWER_TEST_INPUT="$(
         find \
             "$PROJECT_ROOT/test-swift-testing-local.sh" \
+            "$PROJECT_ROOT/Sources/SignalSieve/App/SignalSieveViewModel.swift" \
+            "$PROJECT_ROOT/Sources/SignalSieve/DesignSystem/FindingCopyButton.swift" \
+            "$PROJECT_ROOT/Sources/SignalSieve/DesignSystem/SheetScaffold.swift" \
+            "$PROJECT_ROOT/Sources/SignalSieve/DesignSystem/SieveControls.swift" \
+            "$PROJECT_ROOT/Sources/SignalSieve/Features/ActiveGuard/ClipboardNoticePanel.swift" \
+            "$PROJECT_ROOT/Sources/SignalSieve/Platform/ClipboardImagePasteboardReader.swift" \
+            "$PROJECT_ROOT/Tests/SignalSieveAppTests" \
             "$PROJECT_ROOT/Tests/SignalSieveCoreTests" \
             "$PROJECT_ROOT/Tests/SwiftTestingLocalRunner" \
             -type f -newer "$TEST_EXECUTABLE" -print -quit
@@ -96,6 +107,7 @@ if [[ "$NEEDS_TEST_BUILD" == true ]]; then
     swiftc \
         -warnings-as-errors \
         -target "$TEST_DEPLOYMENT_TARGET" \
+        -enable-testing \
         -parse-as-library \
         -sdk "$SDK_PATH" \
         -module-cache-path "$MODULE_CACHE" \
@@ -103,9 +115,37 @@ if [[ "$NEEDS_TEST_BUILD" == true ]]; then
         -I "$PROJECT_ROOT/Sources/CSignalSieveZip/include" \
         -L "$BUILD_DIR" \
         -lSignalSieveCore \
+        -emit-module \
+        -emit-library \
+        -module-name SignalSieve \
+        "$PROJECT_ROOT/Sources/SignalSieve/App/SignalSieveViewModel.swift" \
+        "$PROJECT_ROOT/Sources/SignalSieve/DesignSystem/FindingCopyButton.swift" \
+        "$PROJECT_ROOT/Sources/SignalSieve/DesignSystem/SheetScaffold.swift" \
+        "$PROJECT_ROOT/Sources/SignalSieve/DesignSystem/SieveControls.swift" \
+        "$PROJECT_ROOT/Sources/SignalSieve/Features/ActiveGuard/ClipboardNoticePanel.swift" \
+        "$PROJECT_ROOT/Sources/SignalSieve/Platform/ClipboardImagePasteboardReader.swift" \
+        -emit-module-path "$BUILD_DIR/SignalSieve.swiftmodule" \
+        -o "$APP_LIBRARY" \
+        -Xlinker -install_name \
+        -Xlinker @rpath/libSignalSieve.dylib \
+        -Xlinker -rpath \
+        -Xlinker @executable_path
+
+    swiftc \
+        -warnings-as-errors \
+        -target "$TEST_DEPLOYMENT_TARGET" \
+        -parse-as-library \
+        -sdk "$SDK_PATH" \
+        -module-cache-path "$MODULE_CACHE" \
+        -I "$BUILD_DIR" \
+        -I "$PROJECT_ROOT/Sources/CSignalSieveZip/include" \
+        -L "$BUILD_DIR" \
+        -lSignalSieve \
+        -lSignalSieveCore \
         "${TESTING_FRAMEWORK_FLAGS[@]}" \
         -enable-testing \
         -Xfrontend -disable-cross-import-overlays \
+        "$PROJECT_ROOT/Tests/SignalSieveAppTests"/*.swift \
         "$PROJECT_ROOT/Tests/SignalSieveCoreTests"/*.swift \
         "$PROJECT_ROOT/Tests/SwiftTestingLocalRunner/main.swift" \
         -o "$TEST_EXECUTABLE" \
