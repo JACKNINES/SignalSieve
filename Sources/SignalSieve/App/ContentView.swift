@@ -6,6 +6,7 @@ import SignalSieveCore
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var model: SignalSieveViewModel
+    @Binding var toolbarSection: ToolbarSection
     @State private var showsPrivateRules = false
     @State private var showsVaccine = false
     @State private var showsFolderTriage = false
@@ -19,7 +20,6 @@ struct ContentView: View {
     @State private var showsGlossary = false
     @State private var showsCovertChannels = false
     @State private var showsCommunityEngines = false
-    @State private var toolbarSection: ToolbarSection = .review
     @State private var expandedPanel: EditorPanel?
 
     /// Which editor panel, if any, is currently taking the full window width.
@@ -292,7 +292,6 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
                 ToolbarSectionPicker(selection: $toolbarSection, localized: model.localized)
-                    .accessibilityLabel(model.localized("Toolbar section"))
 
                 Text(model.localized(toolbarSection.hint))
                     .font(.caption)
@@ -315,9 +314,9 @@ struct ContentView: View {
                     }
                     .frame(minWidth: proxy.size.width, alignment: .leading)
                 }
-                .scrollIndicators(.hidden)
+                .scrollIndicators(.automatic)
             }
-            .frame(height: 26)
+            .frame(height: 30)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -327,8 +326,12 @@ struct ContentView: View {
     private var reviewControls: some View {
         Button(model.localized("Paste"), systemImage: "doc.on.clipboard", action: model.paste)
             .sieveToolbarButton()
+            .help(model.localized("Paste clipboard text into Input. Shortcut: Command-Option-V."))
+            .accessibilityHint(model.localized("Paste clipboard text into Input. Shortcut: Command-Option-V."))
         Button(model.localized("Inspect"), systemImage: "magnifyingglass", action: model.inspect)
             .sieveToolbarButton(.primary)
+            .help(model.localized("Inspect Input locally. Shortcut: Command-Return."))
+            .accessibilityHint(model.localized("Inspect Input locally. Shortcut: Command-Return."))
         Button(model.localized("Reveal"), systemImage: "eye.fill") {
             showsReveal = true
         }
@@ -471,63 +474,44 @@ struct ContentView: View {
 
     @ViewBuilder
     private var analyzeControls: some View {
-        Button(model.localized("Vaccine"), systemImage: "syringe.fill") {
-            showsVaccine = true
+        ForEach(AnalyzeToolbarPresentation.visibleAtMinimumWidth) { action in
+            analyzeToolButton(action)
         }
-        .sieveToolbarButton()
-        Button(model.localized("Folder Triage"), systemImage: "folder.badge.gearshape") {
-            showsFolderTriage = true
+
+        Menu {
+            ForEach(AnalyzeToolbarPresentation.overflowAtMinimumWidth) { action in
+                analyzeToolMenuButton(action)
+            }
+        } label: {
+            SieveMenuLabel(title: model.localized("More Tools"), systemImage: "ellipsis.circle")
         }
-        .sieveToolbarButton()
-        Button(model.localized("Signature Hunt"), systemImage: "scope") {
-            showsSignatureHunt = true
-        }
-        .sieveToolbarButton()
-        Button(model.localized("File Inspector"), systemImage: "doc.text.magnifyingglass") {
-            model.openFileProvenanceInspector()
-        }
-        .sieveToolbarButton()
-        Button(model.localized("Pixel Lab"), systemImage: "photo.badge.magnifyingglass") {
-            showsPixelWatermarkModule = true
-        }
-        .sieveToolbarButton()
-        Button(model.localized("Carrier Lab"), systemImage: "point.3.filled.connected.trianglepath.dotted") {
-            showsCovertChannels = true
-        }
-        .sieveToolbarButton()
-        Button(model.localized("Community Engines"), systemImage: "shippingbox.and.arrow.backward") {
-            showsCommunityEngines = true
-        }
-        .sieveToolbarButton()
+        .menuStyle(.button)
+        .fixedSize()
+        .help(model.localized("Open additional Analyze tools."))
+        .accessibilityLabel(model.localized("More Tools"))
+        .accessibilityHint(model.localized("Open additional Analyze tools."))
 
         SieveToolbarDivider()
 
-        // Tinted: these two act on whatever is in the Input panel right now.
-        Button(model.localized("Surface Regularity"), systemImage: "waveform.badge.magnifyingglass") {
-            model.runWatermarkProbe()
-            showsWatermarkProbe = true
+        ForEach(AnalyzeToolbarPresentation.primaryTextActionsAtMinimumWidth) { action in
+            analyzeToolButton(action)
         }
-        .sieveToolbarButton(.accented)
-        .disabled(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        .help(model.localized("Screens visible statistical regularity locally without claiming provider attribution."))
-
-        Button(model.localized("Rewrite Integrity"), systemImage: "arrow.left.arrow.right.square") {
-            model.runRewriteIntegrity()
-            showsRewriteIntegrity = true
-        }
-        .sieveToolbarButton(.accented)
-        .disabled(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        .help(model.localized("Compares Input and Result or creates an optional local rewrite without claiming semantic equivalence."))
     }
 
     @ViewBuilder
     private var cleanControls: some View {
         Button(model.localized("Safe Clean"), systemImage: "wand.and.stars") { model.clean(mode: .safe) }
             .sieveToolbarButton(.accented)
+            .help(model.localized("Prepare a Safe Clean result. Shortcut: Command-K."))
+            .accessibilityHint(model.localized("Prepare a Safe Clean result. Shortcut: Command-K."))
         Button(model.localized("Strict Clean"), systemImage: "wand.and.sparkles") { model.clean(mode: .strict) }
             .sieveToolbarButton()
+            .help(model.localized("Prepare a Strict Clean result. Shortcut: Command-Shift-K."))
+            .accessibilityHint(model.localized("Prepare a Strict Clean result. Shortcut: Command-Shift-K."))
         Button(model.localized("Clean Links"), systemImage: "link.badge.plus", action: model.cleanLinks)
             .sieveToolbarButton()
+            .help(model.localized("Clean tracked links locally. Shortcut: Command-Option-L."))
+            .accessibilityHint(model.localized("Clean tracked links locally. Shortcut: Command-Option-L."))
         Button(model.localized("Link Coverage"), systemImage: "list.bullet.rectangle.portrait") {
             showsLinkCoverage = true
         }
@@ -555,10 +539,91 @@ struct ContentView: View {
 
         Button(model.localized("Use Result"), systemImage: "arrow.left", action: model.moveOutputToInput)
             .sieveToolbarButton()
+            .help(model.localized("Move Result back to Input. Shortcut: Command-Shift-Return."))
+            .accessibilityHint(model.localized("Move Result back to Input. Shortcut: Command-Shift-Return."))
             .disabled(model.output.isEmpty)
         Button(model.localized("Copy Result"), systemImage: "doc.on.doc", action: model.copyOutput)
             .sieveToolbarButton(.primary)
+            .help(model.localized("Copy Result to the clipboard. Shortcut: Command-Shift-C."))
+            .accessibilityHint(model.localized("Copy Result to the clipboard. Shortcut: Command-Shift-C."))
             .disabled(model.output.isEmpty)
+    }
+
+    @ViewBuilder
+    private func analyzeToolButton(_ action: WorkspaceAnalyzeAction) -> some View {
+        let shortcut = analyzeShortcut(for: action)
+        let button = Button(model.localized(action.titleKey), systemImage: action.systemImage) {
+            performAnalyzeAction(action)
+        }
+            .sieveToolbarButton(action.requiresCurrentInput ? .accented : .standard)
+            .disabled(action.requiresCurrentInput && model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .help(analyzeHelp(for: action))
+            .accessibilityLabel(model.localized(action.titleKey))
+            .accessibilityHint(analyzeHelp(for: action))
+
+        if let shortcut {
+            button.keyboardShortcut(shortcut.key, modifiers: shortcut.modifiers)
+        } else {
+            button
+        }
+    }
+
+    @ViewBuilder
+    private func analyzeToolMenuButton(_ action: WorkspaceAnalyzeAction) -> some View {
+        Button(model.localized(action.titleKey), systemImage: action.systemImage) {
+            performAnalyzeAction(action)
+        }
+        .disabled(action.requiresCurrentInput && model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .help(model.localized(action.helpKey))
+        .accessibilityLabel(model.localized(action.titleKey))
+        .accessibilityHint(model.localized(action.helpKey))
+    }
+
+    private func performAnalyzeAction(_ action: WorkspaceAnalyzeAction) {
+        switch action {
+        case .vaccine:
+            showsVaccine = true
+        case .folderTriage:
+            showsFolderTriage = true
+        case .signatureHunt:
+            showsSignatureHunt = true
+        case .fileInspector:
+            model.openFileProvenanceInspector()
+        case .pixelLab:
+            showsPixelWatermarkModule = true
+        case .carrierLab:
+            showsCovertChannels = true
+        case .communityEngines:
+            showsCommunityEngines = true
+        case .surfaceRegularity:
+            model.runWatermarkProbe()
+            showsWatermarkProbe = true
+        case .rewriteIntegrity:
+            model.runRewriteIntegrity()
+            showsRewriteIntegrity = true
+        }
+    }
+
+    private func analyzeShortcut(
+        for action: WorkspaceAnalyzeAction
+    ) -> (key: KeyEquivalent, modifiers: EventModifiers, description: String)? {
+        switch action {
+        case .surfaceRegularity:
+            ("s", [.command, .option], "Command-Option-S")
+        case .rewriteIntegrity:
+            ("r", [.command, .option], "Command-Option-R")
+        default:
+            nil
+        }
+    }
+
+    private func analyzeHelp(for action: WorkspaceAnalyzeAction) -> String {
+        guard let shortcut = analyzeShortcut(for: action) else {
+            return model.localized(action.helpKey)
+        }
+        return model.localized(action.helpKey)
+            + " "
+            + model.formatted("Shortcut: %@", shortcut.description)
     }
 
     private func statusPill(_ title: String, systemImage: String, color: Color) -> some View {
@@ -593,6 +658,8 @@ struct ContentView: View {
             systemImage: "text.cursor",
             tint: .blue,
             expandHelp: model.localized("Expand Input to full width"),
+            placeholder: model.localized("Paste or type text to inspect. Analysis stays on this Mac."),
+            accessibilityHint: model.localized("Edit the text to inspect. Signal Sieve analyzes it locally."),
             text: $model.input
         )
         .onChange(of: model.input) { _ in
@@ -608,6 +675,8 @@ struct ContentView: View {
             systemImage: "checkmark.square",
             tint: .green,
             expandHelp: model.localized("Expand Result to full width"),
+            placeholder: model.localized("Clean or analyze Input to prepare a reviewable Result."),
+            accessibilityHint: model.localized("Review generated output before copying or using it."),
             text: $model.output
         )
     }
@@ -619,6 +688,8 @@ struct ContentView: View {
         systemImage: String,
         tint: Color,
         expandHelp: String,
+        placeholder: String,
+        accessibilityHint: String,
         text: Binding<String>
     ) -> some View {
         let isExpanded = expandedPanel == panel
@@ -651,16 +722,30 @@ struct ContentView: View {
                 .accessibilityLabel(isExpanded ? model.localized("Restore both panels") : expandHelp)
             }
 
-            TextEditor(text: text)
-                .font(.system(.body, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .background(Color(nsColor: .textBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay {
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: text)
+                    .font(.system(.body, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .accessibilityLabel(title)
+                    .accessibilityHint(accessibilityHint)
+
+                if text.wrappedValue.isEmpty {
+                    Text(placeholder)
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 16)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay {
                     RoundedRectangle(cornerRadius: 10)
                         .stroke(Color(nsColor: .separatorColor).opacity(0.8), lineWidth: 1)
-                }
+            }
         }
         .padding(14)
         .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
@@ -694,16 +779,27 @@ struct ContentView: View {
                 riskLegend
             }
 
-            if model.inspection.findings.isEmpty {
-                Label(model.localized("No known hidden Unicode risk found."), systemImage: "checkmark.shield.fill")
+            if let emptyPresentation = WorkspaceFindingsEmptyPresentation.presentation(
+                input: model.input,
+                findingCount: model.inspection.findings.count
+            ) {
+                Label(model.localized(emptyPresentation.messageKey), systemImage: emptyPresentation.systemImage)
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.green)
+                    .foregroundStyle(emptyPresentation.tone == .clear ? .green : .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
-                    .background(.green.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+                    .background(
+                        (emptyPresentation.tone == .clear ? Color.green : Color.secondary)
+                            .opacity(0.07),
+                        in: RoundedRectangle(cornerRadius: 9)
+                    )
                     .overlay {
                         RoundedRectangle(cornerRadius: 9)
-                            .stroke(.green.opacity(0.16), lineWidth: 0.75)
+                            .stroke(
+                                (emptyPresentation.tone == .clear ? Color.green : Color.secondary)
+                                    .opacity(0.16),
+                                lineWidth: 0.75
+                            )
                     }
             } else {
                 ScrollView(.horizontal) {
@@ -1000,13 +1096,19 @@ struct ContentView: View {
     }
 
     private var statusBar: some View {
-        HStack(spacing: 8) {
-            if model.isProcessing {
-                ProgressView().controlSize(.small)
-            } else {
-                Image(systemName: "info.circle")
+        HStack(alignment: .top, spacing: 8) {
+            Group {
+                if model.isProcessing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "info.circle")
+                }
             }
-            Text(model.status).lineLimit(1)
+            .padding(.top, 1)
+
+            Text(model.status)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer()
             Text(model.formatted(
                 "%d scalars · %d UTF-16 units",
@@ -1014,6 +1116,8 @@ struct ContentView: View {
                 model.inspection.utf16Count
             ))
                 .monospacedDigit()
+                .lineLimit(1)
+                .layoutPriority(1)
         }
         .font(.caption)
         .foregroundStyle(.secondary)

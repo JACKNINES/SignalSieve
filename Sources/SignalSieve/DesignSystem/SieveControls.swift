@@ -46,6 +46,149 @@ enum ToolbarSection: String, CaseIterable, Identifiable {
         case .clean: "Produces reviewable output. Code is never modified automatically."
         }
     }
+
+    var shortcutKey: KeyEquivalent {
+        switch self {
+        case .review: "1"
+        case .analyze: "2"
+        case .clean: "3"
+        }
+    }
+
+    var shortcutDescription: String {
+        switch self {
+        case .review: "Command-1"
+        case .analyze: "Command-2"
+        case .clean: "Command-3"
+        }
+    }
+}
+
+enum WorkspaceFindingTone: Equatable {
+    case neutral
+    case clear
+}
+
+struct WorkspaceFindingsEmptyPresentation: Equatable {
+    let messageKey: String
+    let systemImage: String
+    let tone: WorkspaceFindingTone
+
+    static func presentation(input: String, findingCount: Int) -> WorkspaceFindingsEmptyPresentation? {
+        guard findingCount == 0 else { return nil }
+        guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return WorkspaceFindingsEmptyPresentation(
+                messageKey: "Paste or type text to analyze hidden Unicode risk.",
+                systemImage: "text.badge.plus",
+                tone: .neutral
+            )
+        }
+        return WorkspaceFindingsEmptyPresentation(
+            messageKey: "No known hidden Unicode risk found.",
+            systemImage: "checkmark.shield.fill",
+            tone: .clear
+        )
+    }
+}
+
+enum WorkspaceAnalyzeAction: String, CaseIterable, Identifiable {
+    case vaccine
+    case folderTriage
+    case signatureHunt
+    case fileInspector
+    case pixelLab
+    case carrierLab
+    case communityEngines
+    case surfaceRegularity
+    case rewriteIntegrity
+
+    var id: String { rawValue }
+
+    var titleKey: String {
+        switch self {
+        case .vaccine: "Vaccine"
+        case .folderTriage: "Folder Triage"
+        case .signatureHunt: "Signature Hunt"
+        case .fileInspector: "File Inspector"
+        case .pixelLab: "Pixel Lab"
+        case .carrierLab: "Carrier Lab"
+        case .communityEngines: "Community Engines"
+        case .surfaceRegularity: "Surface Regularity"
+        case .rewriteIntegrity: "Rewrite Integrity"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .vaccine: "syringe.fill"
+        case .folderTriage: "folder.badge.gearshape"
+        case .signatureHunt: "scope"
+        case .fileInspector: "doc.text.magnifyingglass"
+        case .pixelLab: "photo.badge.magnifyingglass"
+        case .carrierLab: "point.3.filled.connected.trianglepath.dotted"
+        case .communityEngines: "shippingbox.and.arrow.backward"
+        case .surfaceRegularity: "waveform.badge.magnifyingglass"
+        case .rewriteIntegrity: "arrow.left.arrow.right.square"
+        }
+    }
+
+    var helpKey: String {
+        switch self {
+        case .vaccine:
+            "Scan a project locally before changing any file"
+        case .folderTriage:
+            "Scans a selected folder locally, reports green through red review severity, and can explicitly add or restore app-owned Finder markers without rewriting documents."
+        case .signatureHunt:
+            "Find repeated invisible signatures, preview changes, neutralize, and verify"
+        case .fileInspector:
+            "Open the read-only inspector to choose and analyze the copied file."
+        case .pixelLab:
+            "Inspect image watermark evidence locally without claiming authorship."
+        case .carrierLab:
+            "Looks for hidden messages formed by a repeated relationship between spaces, tabs, zero-width symbols, or look-alike letters."
+        case .communityEngines:
+            "Use independently maintained local MIT tools without making them a Signal Sieve dependency."
+        case .surfaceRegularity:
+            "Screens visible statistical regularity locally without claiming provider attribution."
+        case .rewriteIntegrity:
+            "Compares Input and Result or creates an optional local rewrite without claiming semantic equivalence."
+        }
+    }
+
+    var requiresCurrentInput: Bool {
+        switch self {
+        case .surfaceRegularity, .rewriteIntegrity: true
+        default: false
+        }
+    }
+}
+
+struct AnalyzeToolbarPresentation {
+    static let minimumSupportedWorkspaceWidth: CGFloat = 1000
+
+    static let visibleAtMinimumWidth: [WorkspaceAnalyzeAction] = [
+        .vaccine,
+        .folderTriage,
+        .fileInspector
+    ]
+
+    static let overflowAtMinimumWidth: [WorkspaceAnalyzeAction] = [
+        .signatureHunt,
+        .pixelLab,
+        .carrierLab,
+        .communityEngines
+    ]
+
+    static let primaryTextActionsAtMinimumWidth: [WorkspaceAnalyzeAction] = [
+        .surfaceRegularity,
+        .rewriteIntegrity
+    ]
+
+    static let minimumWidthVisibleControlEstimate: CGFloat = 724
+
+    static var reachableAtMinimumWidth: [WorkspaceAnalyzeAction] {
+        visibleAtMinimumWidth + overflowAtMinimumWidth + primaryTextActionsAtMinimumWidth
+    }
 }
 
 /// How much weight a toolbar control carries. At most one `primary` per
@@ -379,6 +522,16 @@ struct ToolbarSectionPicker: View {
                         .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .help("\(localized(section.title)) · \(section.shortcutDescription)")
+                .accessibilityLabel(localized(section.title))
+                .accessibilityHint(
+                    localized(section.hint)
+                        + " "
+                        + localized("Shortcut: %@").replacingOccurrences(
+                            of: "%@",
+                            with: section.shortcutDescription
+                        )
+                )
                 .accessibilityAddTraits(selection == section ? [.isSelected] : [])
             }
         }
