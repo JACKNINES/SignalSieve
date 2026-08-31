@@ -6,7 +6,17 @@ xcuserdata/
 *.xcuserstate
 *.app
 *.dmg
+*.zip
+*.tar.gz
 *.log
 .env
 .env.*
 .signalsieveignore
+
+# Local user data and restorable copies may contain clipboard history,
+# provenance paths, identifiers, or inspected content. Never version them.
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+backups/
