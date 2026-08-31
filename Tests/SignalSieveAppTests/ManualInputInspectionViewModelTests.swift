@@ -112,7 +112,7 @@ func manualInspectionPreservesAutomaticInputResultPreparation() async {
     model.inputDidChange()
     model.inspect()
 
-    #expect(model.output == "Visiblecarrier")
+    #expect(await waitUntil { model.output == "Visiblecarrier" })
     #expect(await waitUntil { await worker.requestCount == 1 })
 }
 

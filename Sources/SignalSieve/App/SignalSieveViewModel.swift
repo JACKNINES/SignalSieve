@@ -47,6 +47,33 @@ protocol ManualInputInspectionProviding: Sendable {
     func analyze(_ request: ManualInputInspectionRequest) async -> ManualInputInspectionCompletion?
 }
 
+struct AutomaticInputResultRequest: Sendable {
+    let operationID: UInt64
+    let source: String
+    let selectedProtocol: ClipboardAutomationProtocol
+}
+
+enum AutomaticInputResultOutcome: Sendable {
+    case preparedDeterministic(String)
+    case preparedVisualTransfer(VisualTransferResult)
+    case refusedTextAnalysisLimit(TextAnalysisLimitation)
+    case skippedVisualTransferTooLong(maximumCharacterCount: Int)
+    case visualTransferIntegrityCheckFailed
+    case visualTransferFailed(String)
+    case noAutomaticResult
+}
+
+struct AutomaticInputResultCompletion: Sendable {
+    let operationID: UInt64
+    let source: String
+    let selectedProtocol: ClipboardAutomationProtocol
+    let outcome: AutomaticInputResultOutcome
+}
+
+protocol AutomaticInputResultProviding: Sendable {
+    func prepare(_ request: AutomaticInputResultRequest) async -> AutomaticInputResultCompletion?
+}
+
 /// Serializes manual Input inspection away from the main actor. The view model
 /// cancels superseded tasks; the actor checks that cancellation before and
 /// after deterministic core analysis so queued requests do not expand into an
@@ -66,6 +93,105 @@ actor ManualInputInspectionWorker: ManualInputInspectionProviding {
             source: request.source,
             analysis: analysis
         )
+    }
+}
+
+/// Serializes automatic Input-to-Result preparation away from the main actor.
+/// The view model snapshots the source text and selected protocol, cancels
+/// superseded tasks, and applies only the latest matching completion.
+actor AutomaticInputResultWorker: AutomaticInputResultProviding {
+    func prepare(_ request: AutomaticInputResultRequest) async -> AutomaticInputResultCompletion? {
+        guard !Task.isCancelled else { return nil }
+
+        if let limitation = TextAnalysisBudget.limitation(for: request.source) {
+            return AutomaticInputResultCompletion(
+                operationID: request.operationID,
+                source: request.source,
+                selectedProtocol: request.selectedProtocol,
+                outcome: .refusedTextAnalysisLimit(limitation)
+            )
+        }
+
+        if let prepared = InputResultAutomationPolicy.prepareDeterministicResult(
+            from: request.source,
+            isEnabled: true,
+            using: request.selectedProtocol
+        ) {
+            guard !Task.isCancelled else { return nil }
+            return AutomaticInputResultCompletion(
+                operationID: request.operationID,
+                source: request.source,
+                selectedProtocol: request.selectedProtocol,
+                outcome: .preparedDeterministic(prepared)
+            )
+        }
+
+        guard InputResultAutomationPolicy.shouldUseVisualTransfer(
+            isEnabled: true,
+            using: request.selectedProtocol
+        ) else {
+            return AutomaticInputResultCompletion(
+                operationID: request.operationID,
+                source: request.source,
+                selectedProtocol: request.selectedProtocol,
+                outcome: .noAutomaticResult
+            )
+        }
+
+        guard !request.source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return AutomaticInputResultCompletion(
+                operationID: request.operationID,
+                source: request.source,
+                selectedProtocol: request.selectedProtocol,
+                outcome: .preparedDeterministic("")
+            )
+        }
+        guard request.source.count <= ClipboardAutomationPolicy.maximumAutomaticVisualTransferCharacterCount else {
+            return AutomaticInputResultCompletion(
+                operationID: request.operationID,
+                source: request.source,
+                selectedProtocol: request.selectedProtocol,
+                outcome: .skippedVisualTransferTooLong(
+                    maximumCharacterCount: ClipboardAutomationPolicy.maximumAutomaticVisualTransferCharacterCount
+                )
+            )
+        }
+
+        do {
+            // Preserve the existing Visual Transfer debounce while keeping the
+            // OCR preparation itself off the main actor.
+            try await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return nil }
+            let result = try VisualTransfer.roundTrip(request.source)
+            guard !Task.isCancelled else { return nil }
+            guard ClipboardAutomationPolicy.acceptsAutomaticVisualTransfer(
+                original: request.source,
+                candidate: result.text
+            ) else {
+                return AutomaticInputResultCompletion(
+                    operationID: request.operationID,
+                    source: request.source,
+                    selectedProtocol: request.selectedProtocol,
+                    outcome: .visualTransferIntegrityCheckFailed
+                )
+            }
+            return AutomaticInputResultCompletion(
+                operationID: request.operationID,
+                source: request.source,
+                selectedProtocol: request.selectedProtocol,
+                outcome: .preparedVisualTransfer(result)
+            )
+        } catch is CancellationError {
+            return nil
+        } catch {
+            guard !Task.isCancelled else { return nil }
+            return AutomaticInputResultCompletion(
+                operationID: request.operationID,
+                source: request.source,
+                selectedProtocol: request.selectedProtocol,
+                outcome: .visualTransferFailed(error.localizedDescription)
+            )
+        }
     }
 }
 
@@ -277,6 +403,7 @@ final class SignalSieveViewModel: ObservableObject {
     private let defaults: UserDefaults
     private let noticePanel = ClipboardNoticePanelController()
     private let inputInspectionWorker: any ManualInputInspectionProviding
+    private let automaticInputResultWorker: any AutomaticInputResultProviding
     private var clipboardMonitor: AnyCancellable?
     private var inputInspectionTask: Task<Void, Never>?
     private var latestInputInspectionOperationID: UInt64 = 0
@@ -284,6 +411,7 @@ final class SignalSieveViewModel: ObservableObject {
     private var clipboardAnalysisTask: Task<Void, Never>?
     private var automaticVisualTransferTask: Task<Void, Never>?
     private var automaticInputResultTask: Task<Void, Never>?
+    private var latestAutomaticInputResultOperationID: UInt64 = 0
     private var lastPasteboardChangeCount = NSPasteboard.general.changeCount
     private var openMainWindow: (() -> Void)?
     private var adaptiveCopyModel: AdaptiveCopyModel
@@ -332,7 +460,8 @@ final class SignalSieveViewModel: ObservableObject {
         privateRulesURL: URL? = nil,
         adaptiveModelURL: URL? = nil,
         defaults: UserDefaults = .standard,
-        inputInspectionWorker: any ManualInputInspectionProviding = ManualInputInspectionWorker()
+        inputInspectionWorker: any ManualInputInspectionProviding = ManualInputInspectionWorker(),
+        automaticInputResultWorker: any AutomaticInputResultProviding = AutomaticInputResultWorker()
     ) {
         Self.migrateLegacyExecutablePreferencesIfNeeded(to: defaults)
         let resolvedURL = privateRulesURL ?? Self.defaultPrivateRulesURL()
@@ -343,6 +472,7 @@ final class SignalSieveViewModel: ObservableObject {
             ?? AdaptiveCopyModel()
         self.defaults = defaults
         self.inputInspectionWorker = inputInspectionWorker
+        self.automaticInputResultWorker = automaticInputResultWorker
         self.language = AppLanguage.persistedOrEnglish(
             defaults.string(forKey: PreferenceKey.language)
         )
@@ -463,83 +593,73 @@ final class SignalSieveViewModel: ObservableObject {
         automaticInputResultTask?.cancel()
         automaticInputResultTask = nil
 
-        if let limitation = TextAnalysisBudget.limitation(for: input) {
+        let source = input
+        let selectedProtocol = clipboardAutomationProtocol
+        guard automaticallyPreparesInputResult,
+              selectedProtocol.cleaningMode != nil
+                || InputResultAutomationPolicy.shouldUseVisualTransfer(
+                    isEnabled: true,
+                    using: selectedProtocol
+                ) else { return }
+
+        // Never leave a Result produced for an older Input visible while a
+        // worker prepares the replacement.
+        output = ""
+
+        let operationID = nextAutomaticInputResultOperationID()
+        let request = AutomaticInputResultRequest(
+            operationID: operationID,
+            source: source,
+            selectedProtocol: selectedProtocol
+        )
+        let worker = automaticInputResultWorker
+        automaticInputResultTask = Task { [weak self] in
+            guard let completion = await worker.prepare(request),
+                  !Task.isCancelled,
+                  let self else { return }
+            self.applyAutomaticInputResult(completion)
+        }
+    }
+
+    private func applyAutomaticInputResult(_ completion: AutomaticInputResultCompletion) {
+        guard completion.operationID == latestAutomaticInputResultOperationID,
+              automaticallyPreparesInputResult,
+              clipboardAutomationProtocol == completion.selectedProtocol,
+              input == completion.source else { return }
+
+        switch completion.outcome {
+        case .preparedDeterministic(let text):
+            output = text
+        case .preparedVisualTransfer(let result):
+            output = result.text
+            status = formatted(
+                "Automatic Visual Transfer prepared Result with local OCR: %d characters recognized. Review it before use.",
+                result.recognizedCharacterCount
+            )
+        case .refusedTextAnalysisLimit(let limitation):
             output = ""
             status = formatted(
                 "Analysis stopped at the safety limit: %d UTF-8 bytes exceeds the %d-byte maximum. No clean result was produced.",
                 limitation.observedUTF8Bytes,
                 limitation.maximumUTF8Bytes
             )
-            return
-        }
-
-        if let prepared = InputResultAutomationPolicy.prepareDeterministicResult(
-            from: input,
-            isEnabled: automaticallyPreparesInputResult,
-            using: clipboardAutomationProtocol
-        ) {
-            output = prepared
-            return
-        }
-
-        guard InputResultAutomationPolicy.shouldUseVisualTransfer(
-            isEnabled: automaticallyPreparesInputResult,
-            using: clipboardAutomationProtocol
-        ) else { return }
-
-        let source = input
-        guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            output = ""
-            return
-        }
-        guard source.count <= ClipboardAutomationPolicy.maximumAutomaticVisualTransferCharacterCount else {
+        case .skippedVisualTransferTooLong(let maximumCharacterCount):
             output = ""
             status = formatted(
                 "Automatic Visual Transfer skipped text longer than %d characters.",
-                ClipboardAutomationPolicy.maximumAutomaticVisualTransferCharacterCount
+                maximumCharacterCount
             )
-            return
-        }
-
-        // Never leave a Result produced for an older Input visible while OCR
-        // is preparing the replacement. Debouncing avoids starting Vision for
-        // every intermediate keystroke.
-        output = ""
-        automaticInputResultTask = Task { [weak self] in
-            do {
-                try await Task.sleep(for: .milliseconds(350))
-                guard !Task.isCancelled else { return }
-                let result = try await Task.detached(priority: .userInitiated) {
-                    try VisualTransfer.roundTrip(source)
-                }.value
-                guard !Task.isCancelled, let self else { return }
-                guard self.automaticallyPreparesInputResult,
-                      self.clipboardAutomationProtocol == .visualTransfer,
-                      self.input == source else { return }
-                guard ClipboardAutomationPolicy.acceptsAutomaticVisualTransfer(
-                    original: source,
-                    candidate: result.text
-                ) else {
-                    self.status = self.localized("Automatic Visual Transfer did not prepare Result because OCR changed a URL, number, quotation, or produced an unsafe result.")
-                    return
-                }
-                self.output = result.text
-                self.status = self.formatted(
-                    "Automatic Visual Transfer prepared Result with local OCR: %d characters recognized. Review it before use.",
-                    result.recognizedCharacterCount
-                )
-            } catch is CancellationError {
-                return
-            } catch {
-                guard !Task.isCancelled, let self else { return }
-                guard self.automaticallyPreparesInputResult,
-                      self.clipboardAutomationProtocol == .visualTransfer,
-                      self.input == source else { return }
-                self.status = self.formatted(
-                    "Automatic Visual Transfer could not prepare Result: %@",
-                    error.localizedDescription
-                )
-            }
+        case .visualTransferIntegrityCheckFailed:
+            output = ""
+            status = localized("Automatic Visual Transfer did not prepare Result because OCR changed a URL, number, quotation, or produced an unsafe result.")
+        case .visualTransferFailed(let message):
+            output = ""
+            status = formatted(
+                "Automatic Visual Transfer could not prepare Result: %@",
+                message
+            )
+        case .noAutomaticResult:
+            break
         }
     }
 
@@ -986,6 +1106,11 @@ final class SignalSieveViewModel: ObservableObject {
     private func nextInputInspectionOperationID() -> UInt64 {
         latestInputInspectionOperationID += 1
         return latestInputInspectionOperationID
+    }
+
+    private func nextAutomaticInputResultOperationID() -> UInt64 {
+        latestAutomaticInputResultOperationID += 1
+        return latestAutomaticInputResultOperationID
     }
 
     private func persistPrivateRules() throws {
