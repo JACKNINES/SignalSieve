@@ -14,9 +14,20 @@ SignalSieve is designed around local processing and data minimization.
 - Advanced Carrier Lab performs bounded relational analysis locally. Decoded
   carrier content remains in the current view and is not saved or submitted to
   a provider.
-- Pattern Memory keeps up to ten raw samples in process memory only.
+- Pattern Memory keeps up to ten raw samples in process memory only. Each
+  sample is capped at 64 KiB of UTF-8 and total Pattern Memory at 256 KiB;
+  oversized samples are rejected rather than truncated.
 - Pattern Memory samples are discarded when the application exits or the user
   chooses **Clear Session Memory**.
+- Interactive Input and Active Guard analysis stop before analyzer allocation
+  when text exceeds 1 MiB of UTF-8. Oversized text is not partially classified,
+  automatically cleaned, or learned, so a skipped analysis cannot appear as a
+  clean verdict.
+- Personal Baseline stores only aggregate numeric feature statistics in a local
+  JSON file. Individual samples are capped at 64 KiB and are evaluated before
+  learning. Copies with deterministic findings, suspicious repeated patterns,
+  or a statistical anomaly are not admitted. The model file is capped at
+  64 KiB and structurally validated before decoding.
 - While **Active Guard** is enabled and SignalSieve is running, the app checks
   the macOS pasteboard locally for newly copied content. It ignores the clipboard
   contents that existed before monitoring began.

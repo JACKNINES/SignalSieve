@@ -334,6 +334,7 @@ public enum ClipboardAutomationPolicy {
         isPrivacySensitive: Bool
     ) -> ClipboardAutomationSkipReason? {
         guard selection != .reviewAll else { return nil }
+        if TextAnalysisBudget.limitation(for: text) != nil { return .inputTooLarge }
         if isPrivacySensitive { return .privacySensitiveClipboard }
         if hasNonTextRepresentation { return .nonTextRepresentation }
         if isLikelyCode { return .sourceCode }

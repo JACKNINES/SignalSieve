@@ -107,6 +107,7 @@ swiftc \
     "$PROJECT_ROOT/Sources/SignalSieveCore/SignalSieveIgnore.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/SignatureHunt.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/TextCleaner.swift" \
+    "$PROJECT_ROOT/Sources/SignalSieveCore/TextAnalysisBudget.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/TextEncodingDetector.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/URLTrackerCleaner.swift" \
     "$PROJECT_ROOT/Sources/SignalSieveCore/VisualTransfer.swift" \

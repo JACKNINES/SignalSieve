@@ -12,6 +12,7 @@ public enum InputResultAutomationPolicy {
         guard isEnabled else { return nil }
         guard let mode = selection.cleaningMode else { return nil }
         guard !input.isEmpty else { return "" }
+        guard TextAnalysisBudget.limitation(for: input) == nil else { return nil }
         return TextCleaner.clean(input, mode: mode).text
     }
 

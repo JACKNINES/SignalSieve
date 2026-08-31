@@ -24,6 +24,16 @@ public issue. Provide the smallest synthetic reproduction possible.
   Clean-result and original-restore actions are available only for history-
   eligible, untruncated automatic-cleaning entries, and they fail closed if the
   pasteboard change count or expected text no longer matches.
+- Interactive text paths share a 1 MiB UTF-8 core budget. Active Guard, manual
+  inspection, deterministic Input automation, cleaning actions, Pattern Memory,
+  Surface Regularity, and Rewrite Integrity fail closed before their analyzers
+  allocate working collections. Oversized text is neither partially analyzed
+  nor labeled clean, and automatic clipboard replacement is skipped.
+- Pattern Memory rejects samples over 64 KiB and retains at most 256 KiB across
+  its ten session samples. Personal Baseline feature extraction is capped at
+  64 KiB per sample; deterministic-risk and anomalous samples are evaluated but
+  not learned. Its aggregate-only JSON is capped at 64 KiB and validated for
+  schema, feature names, counts, and finite statistics before use.
 - Opening a finding in the browser is an explicit network boundary. Unicode
   queries contain element metadata only; Surface Regularity queries contain only
   the generic signal topic. Neither may contain the analyzed text.

@@ -244,7 +244,15 @@ func translatesPrimaryInterfaceText() {
         "High-risk code evidence detected.",
         "High-risk Unicode evidence detected.",
         "Container structure anomaly detected.",
-        "Metadata evidence detected."
+        "Metadata evidence detected.",
+        "Analysis safety limit",
+        "Clipboard analysis stopped at its safety limit",
+        "Clipboard text exceeded the analysis safety limit",
+        "%d UTF-8 bytes exceeded the %d-byte maximum. SignalSieve did not inspect, learn from, or automatically rewrite this copy, so no safety verdict was produced.",
+        "Analysis safety-limit warnings follow the global alert visibility setting.",
+        "Analysis stopped at the safety limit: %d UTF-8 bytes exceeds the %d-byte maximum. No clean result was produced.",
+        "Analysis stopped at the safety limit: %d UTF-8 bytes exceeds the %d-byte maximum. No safety verdict was produced.",
+        "Pattern Memory skipped text larger than %d UTF-8 bytes."
     ]
     for key in popupKeys {
         #expect(AppLocalization.hasTranslation(key, language: .spanish))

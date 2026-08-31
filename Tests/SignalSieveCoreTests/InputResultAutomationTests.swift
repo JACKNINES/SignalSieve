@@ -52,3 +52,16 @@ func recognizesAutomaticInputOCRProtocol() {
         using: .safeClean
     ))
 }
+
+@Test("Input automation refuses oversized text instead of producing a partial result")
+func refusesOversizedAutomaticInputResult() {
+    let oversized = String(
+        repeating: "a",
+        count: TextAnalysisBudget.maximumInteractiveUTF8Bytes + 1
+    )
+    #expect(InputResultAutomationPolicy.prepareDeterministicResult(
+        from: oversized,
+        isEnabled: true,
+        using: .strictClean
+    ) == nil)
+}

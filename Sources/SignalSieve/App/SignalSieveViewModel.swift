@@ -43,6 +43,28 @@ private actor ClipboardAnalysisWorker {
         isPrivacySensitive: Bool
     ) -> ClipboardCoreAnalysis? {
         guard !Task.isCancelled else { return nil }
+        let originalAnalysis = ClipboardProtectionAnalyzer.analyze(
+            text,
+            recentPatternTexts: recentPatternTexts,
+            customRules: customRules
+        )
+        if originalAnalysis.limitation != nil {
+            let automationResult = ClipboardAutomationResult(
+                text: text,
+                skipReason: .inputTooLarge
+            )
+            return ClipboardCoreAnalysis(
+                copiedCodeAnalysis: originalAnalysis.codeAnalysis,
+                initialLinkCleaning: originalAnalysis.linkCleaning,
+                effectiveText: text,
+                linkWasPreparedForAutomaticCleaning: false,
+                automationResult: automationResult,
+                shouldFlattenRichText: false,
+                originalAnalysis: originalAnalysis,
+                finalAnalysis: originalAnalysis,
+                finalLinkCleaning: originalAnalysis.linkCleaning
+            )
+        }
         let copiedCodeAnalysis = CodeGuardAnalyzer.analyze(text)
         let initialLinkCleaning = URLTrackerCleaner.cleanLinks(in: text, customRules: customRules)
         let hasNonTextRepresentation = typeInventory.kinds.contains(.image)
@@ -71,11 +93,6 @@ private actor ClipboardAnalysisWorker {
             using: automationProtocol,
             hasRichTextRepresentation: typeInventory.containsRichTextRepresentation,
             skipReason: automationResult.skipReason
-        )
-        let originalAnalysis = ClipboardProtectionAnalyzer.analyze(
-            text,
-            recentPatternTexts: recentPatternTexts,
-            customRules: customRules
         )
         let finalAnalysis = effectiveText == text
             ? originalAnalysis
@@ -401,6 +418,16 @@ final class SignalSieveViewModel: ObservableObject {
         automaticInputResultTask?.cancel()
         automaticInputResultTask = nil
 
+        if let limitation = TextAnalysisBudget.limitation(for: input) {
+            output = ""
+            status = formatted(
+                "Analysis stopped at the safety limit: %d UTF-8 bytes exceeds the %d-byte maximum. No clean result was produced.",
+                limitation.observedUTF8Bytes,
+                limitation.maximumUTF8Bytes
+            )
+            return
+        }
+
         if let prepared = InputResultAutomationPolicy.prepareDeterministicResult(
             from: input,
             isEnabled: automaticallyPreparesInputResult,
@@ -478,6 +505,10 @@ final class SignalSieveViewModel: ObservableObject {
     }
 
     func inspect() {
+        if let limitation = TextAnalysisBudget.limitation(for: input) {
+            applyAnalysisLimitation(limitation)
+            return
+        }
         inspection = HiddenTextAnalyzer.inspect(input)
         covertChannelReport = CovertTextChannelAnalyzer.analyze(input)
         codeAnalysis = CodeGuardAnalyzer.analyze(input)
@@ -542,6 +573,7 @@ final class SignalSieveViewModel: ObservableObject {
     }
 
     func clean(mode: CleaningMode) {
+        guard requireInteractiveAnalysisBudget() else { return }
         let result = TextCleaner.clean(input, mode: mode)
         output = result.text
         let label = localized(mode == .safe ? "Safe cleaning" : "Strict cleaning")
@@ -549,6 +581,7 @@ final class SignalSieveViewModel: ObservableObject {
     }
 
     func cleanLinks() {
+        guard requireInteractiveAnalysisBudget() else { return }
         let result = URLTrackerCleaner.cleanLinks(in: input, customRules: privateRules)
         linkCleaningReport = result
         output = result.text
@@ -583,6 +616,7 @@ final class SignalSieveViewModel: ObservableObject {
     }
 
     func cleanCodeForReview() {
+        guard requireInteractiveAnalysisBudget() else { return }
         guard codeAnalysis.isLikelyCode else {
             status = localized("No source code was detected in the current input.")
             return
@@ -642,6 +676,7 @@ final class SignalSieveViewModel: ObservableObject {
     }
 
     func runWatermarkProbe() {
+        guard requireInteractiveAnalysisBudget() else { return }
         watermarkProbeReport = WatermarkProbeAnalyzer.analyze(input)
         status = formatted(
             "Surface Regularity analyzed %d words locally.",
@@ -650,6 +685,8 @@ final class SignalSieveViewModel: ObservableObject {
     }
 
     func runRewriteIntegrity() {
+        guard requireInteractiveAnalysisBudget(for: input),
+              requireInteractiveAnalysisBudget(for: output) else { return }
         rewriteIntegrityReport = RewriteIntegrityAnalyzer.analyze(
             original: input,
             candidate: output
@@ -757,6 +794,15 @@ final class SignalSieveViewModel: ObservableObject {
 
     func visualTransfer() {
         let source = input
+        guard TextAnalysisBudget.limitation(for: source) == nil,
+              source.count <= ClipboardAutomationPolicy.maximumAutomaticVisualTransferCharacterCount else {
+            output = ""
+            status = formatted(
+                "Visual Transfer skipped text longer than %d characters.",
+                ClipboardAutomationPolicy.maximumAutomaticVisualTransferCharacterCount
+            )
+            return
+        }
         isProcessing = true
         status = localized("Rendering as an image and reading it with local OCR…")
 
@@ -787,7 +833,12 @@ final class SignalSieveViewModel: ObservableObject {
         let sample = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let update = ClipboardProtectionAnalyzer.appendingPatternSample(text, to: patternTexts)
         guard update.added else {
-            if !sample.isEmpty && sample.count < ClipboardProtectionAnalyzer.minimumPatternSampleLength {
+            if update.rejectionReason == .inputTooLarge {
+                status = formatted(
+                    "Pattern Memory skipped text larger than %d UTF-8 bytes.",
+                    TextAnalysisBudget.maximumPatternSampleUTF8Bytes
+                )
+            } else if !sample.isEmpty && sample.count < ClipboardProtectionAnalyzer.minimumPatternSampleLength {
                 status = localized("Text is too short for useful pattern comparison.")
             } else if !sample.isEmpty {
                 status = localized("This text is already the latest Pattern Memory sample.")
@@ -813,6 +864,38 @@ final class SignalSieveViewModel: ObservableObject {
                 patternTexts.count
             )
         }
+    }
+
+    private func requireInteractiveAnalysisBudget(for text: String? = nil) -> Bool {
+        let candidate = text ?? input
+        guard let limitation = TextAnalysisBudget.limitation(for: candidate) else {
+            return true
+        }
+        applyAnalysisLimitation(limitation)
+        return false
+    }
+
+    private func applyAnalysisLimitation(_ limitation: TextAnalysisLimitation) {
+        let empty = ClipboardProtectionAnalyzer.analyze("", recentPatternTexts: [])
+        inspection = empty.inspection
+        covertChannelReport = empty.covertChannelReport
+        codeAnalysis = empty.codeAnalysis
+        binaryAnalysis = empty.binaryAnalysis
+        identifierAnalysis = empty.identifierAnalysis
+        scamAnalysis = empty.scamAnalysis
+        linkCleaningReport = empty.linkCleaning
+        adaptiveAnalysis = AdaptiveCopyAnalysis(
+            sampleCountBeforeLearning: adaptiveCopyModel.sampleCount,
+            anomalyScore: 0,
+            deviations: [],
+            wasEligibleForLearning: false
+        )
+        revealedFragments = []
+        status = formatted(
+            "Analysis stopped at the safety limit: %d UTF-8 bytes exceeds the %d-byte maximum. No safety verdict was produced.",
+            limitation.observedUTF8Bytes,
+            limitation.maximumUTF8Bytes
+        )
     }
 
     private func persistPrivateRules() throws {
@@ -886,6 +969,7 @@ final class SignalSieveViewModel: ObservableObject {
                     deviations: [],
                     wasEligibleForLearning: false
                 ),
+                analysisLimitation: nil,
                 clipboardContentKinds: typeInventory.kinds,
                 pasteboardChangeCount: pasteboard.changeCount,
                 automaticCleaningAudit: nil,
@@ -1138,11 +1222,16 @@ final class SignalSieveViewModel: ObservableObject {
         scamAnalysis = analysis.scamAnalysis
 
         if isAdaptiveModelEnabled, shouldStoreInHistory {
-            adaptiveAnalysis = adaptiveCopyModel.evaluateAndLearn(copiedText)
-            do {
-                try AdaptiveCopyModelStore.save(adaptiveCopyModel, to: adaptiveModelURL)
-            } catch {
-                status = localized("Usual copy patterns could not save their numerical measurements.")
+            adaptiveAnalysis = adaptiveCopyModel.evaluateAndLearn(
+                copiedText,
+                allowLearning: AdaptiveCopyLearningPolicy.allowsLearning(from: analysis)
+            )
+            if adaptiveAnalysis.wasEligibleForLearning {
+                do {
+                    try AdaptiveCopyModelStore.save(adaptiveCopyModel, to: adaptiveModelURL)
+                } catch {
+                    status = localized("Usual copy patterns could not save their numerical measurements.")
+                }
             }
         } else {
             adaptiveAnalysis = AdaptiveCopyAnalysis(
@@ -1240,6 +1329,7 @@ final class SignalSieveViewModel: ObservableObject {
                 || alertIdentifierAnalysis.containsIdentifiers
                 || alertScamAnalysis.isPotentialScam
                 || alertAdaptiveAnalysis.isAnomalous
+                || analysis.limitation != nil
                 || audit?.receipt.verdict == .riskRemainsDoNotShare
                 || fileMetadataAlert else {
             return
@@ -1267,6 +1357,7 @@ final class SignalSieveViewModel: ObservableObject {
             identifierAnalysis: alertIdentifierAnalysis,
             scamAnalysis: alertScamAnalysis,
             adaptiveAnalysis: alertAdaptiveAnalysis,
+            analysisLimitation: analysis.limitation,
             clipboardContentKinds: fileMetadataAlert ? typeInventory.kinds : [],
             pasteboardChangeCount: resultPasteboardChangeCount,
             automaticCleaningAudit: audit,
@@ -1313,6 +1404,11 @@ final class SignalSieveViewModel: ObservableObject {
         let pasteboard = NSPasteboard.general
         guard let currentText = pasteboard.string(forType: .string) else {
             status = localized("The clipboard no longer contains text.")
+            noticePanel.dismissCurrent()
+            return
+        }
+        guard TextAnalysisBudget.limitation(for: currentText) == nil else {
+            status = localizedClipboardAutomationSkip(.inputTooLarge)
             noticePanel.dismissCurrent()
             return
         }
@@ -1502,6 +1598,10 @@ final class SignalSieveViewModel: ObservableObject {
         guard pasteboard.changeCount == notice.pasteboardChangeCount,
               let currentText = pasteboard.string(forType: .string) else {
             status = localized("Clipboard Protocol was saved, but the current clipboard changed before cleaning.")
+            return
+        }
+        guard TextAnalysisBudget.limitation(for: currentText) == nil else {
+            status = localizedClipboardAutomationSkip(.inputTooLarge)
             return
         }
 
@@ -1768,6 +1868,10 @@ final class SignalSieveViewModel: ObservableObject {
             return
         }
         let currentText = notice.clipboardText
+        guard TextAnalysisBudget.limitation(for: currentText) == nil else {
+            status = localizedClipboardAutomationSkip(.inputTooLarge)
+            return
+        }
         let typeInventory = ClipboardTypeAnalyzer.analyze(
             typeIdentifiers: (pasteboard.types ?? []).map(\.rawValue)
         )
@@ -1997,6 +2101,9 @@ final class SignalSieveViewModel: ObservableObject {
 
     private func setWarning(_ kind: ClipboardWarningKind, isSuppressed: Bool) {
         switch kind {
+        case .analysisLimit:
+            status = localized("Analysis safety-limit warnings follow the global alert visibility setting.")
+            return
         case .hiddenUnicode: warnsAboutHiddenUnicode = !isSuppressed
         case .unsafeCode: warnsAboutCodeRisks = !isSuppressed
         case .binaryContent: warnsAboutBinaryContent = !isSuppressed

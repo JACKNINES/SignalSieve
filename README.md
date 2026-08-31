@@ -213,6 +213,10 @@ they contain no real account, organization, or third-party message data.
   Alert visibility is a separate setting: users may hide
   green and yellow alerts, or hide green through orange alerts. The two
   visibility choices are mutually exclusive, and red alerts cannot be disabled.
+- Interactive text analysis has a shared 1 MiB UTF-8 safety budget enforced in
+  the core. Oversized Input or clipboard text is not partially inspected,
+  learned, or automatically rewritten. Signal Sieve reports an incomplete
+  analysis instead of presenting a green verdict.
 - **Automatic Input Result** is enabled by default. Pasting or typing in the
   Input editor prepares Result with the selected Safe Clean, Strict Clean, or
   Visual Transfer protocol. OCR is debounced, bounded, and discarded if Input
@@ -263,6 +267,15 @@ they contain no real account, organization, or third-party message data.
 - **Pattern Memory:** compares up to ten recent texts for repeated phrases,
   sentence openings, list structures, and punctuation choices. Samples remain
   in memory for the current session only and disappear when the app exits.
+  Each sample is capped at 64 KiB of UTF-8 and the complete memory at 256 KiB;
+  oversized samples are rejected rather than truncated into misleading
+  evidence.
+- **Personal Baseline:** learns only aggregate numerical writing measurements,
+  never copied text, tokens, URLs, hashes, or application names. It evaluates a
+  copy before learning and refuses deterministic findings, repeated-pattern
+  alerts, statistical outliers, and samples over 64 KiB so suspicious input
+  cannot silently redefine “usual.” Its local JSON state is validated and
+  capped at 64 KiB before decoding.
 - **Surface Regularity (experimental):** performs a local, keyless stylometric
   screen for observable writing patterns in a single text. It measures repeated
   three-word sequences, moving-window lexical diversity, sentence-length

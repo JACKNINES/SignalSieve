@@ -38,13 +38,18 @@ public struct AdaptiveCopyAnalysis: Sendable, Equatable {
     }
 
     public var isAnomalous: Bool {
-        isWarmedUp && deviations.count >= 2 && anomalyScore >= 0.62
+        isWarmedUp && isLearningOutlier
+    }
+
+    public var isLearningOutlier: Bool {
+        deviations.count >= 2 && anomalyScore >= 0.62
     }
 }
 
 public struct AdaptiveCopyModel: Codable, Sendable, Equatable {
     public static let currentSchemaVersion = 1
     public static let minimumTrainingSamples = 12
+    public static let minimumOutlierScreeningSamples = 4
     public static let minimumCharacters = 24
 
     public private(set) var schemaVersion: Int
@@ -60,7 +65,10 @@ public struct AdaptiveCopyModel: Codable, Sendable, Equatable {
     /// Evaluates before learning, then updates only aggregate numeric state.
     /// Clipboard text, tokens, hashes, URLs, and application names are never
     /// stored in the model.
-    public mutating func evaluateAndLearn(_ text: String) -> AdaptiveCopyAnalysis {
+    public mutating func evaluateAndLearn(
+        _ text: String,
+        allowLearning: Bool = true
+    ) -> AdaptiveCopyAnalysis {
         let features = Self.features(for: text)
         guard text.count >= Self.minimumCharacters, !features.isEmpty else {
             return AdaptiveCopyAnalysis(
@@ -73,13 +81,21 @@ public struct AdaptiveCopyModel: Codable, Sendable, Equatable {
 
         let priorCount = sampleCount
         let analysis = evaluateFeatures(features, priorCount: priorCount)
+        let shouldLearn = allowLearning && !analysis.isLearningOutlier
+        let result = AdaptiveCopyAnalysis(
+            sampleCountBeforeLearning: analysis.sampleCountBeforeLearning,
+            anomalyScore: analysis.anomalyScore,
+            deviations: analysis.deviations,
+            wasEligibleForLearning: shouldLearn
+        )
+        guard shouldLearn else { return result }
         for (key, value) in features {
             var statistic = statistics[key] ?? RunningStatistic()
             statistic.add(winsorized(value, using: statistic))
             statistics[key] = statistic
         }
         sampleCount += 1
-        return analysis
+        return result
     }
 
     /// Scores a text against the current aggregate baseline without changing
@@ -98,6 +114,10 @@ public struct AdaptiveCopyModel: Codable, Sendable, Equatable {
     }
 
     public static func features(for text: String) -> [String: Double] {
+        guard TextAnalysisBudget.limitation(
+            for: text,
+            maximumUTF8Bytes: TextAnalysisBudget.maximumAdaptiveSampleUTF8Bytes
+        ) == nil else { return [:] }
         let characters = Array(text)
         guard !characters.isEmpty else { return [:] }
         let words = text.split { !$0.isLetter && !$0.isNumber }
@@ -129,7 +149,7 @@ public struct AdaptiveCopyModel: Codable, Sendable, Equatable {
         _ features: [String: Double],
         priorCount: Int
     ) -> AdaptiveCopyAnalysis {
-        guard priorCount >= Self.minimumTrainingSamples else {
+        guard priorCount >= Self.minimumOutlierScreeningSamples else {
             return AdaptiveCopyAnalysis(
                 sampleCountBeforeLearning: priorCount,
                 anomalyScore: 0,
@@ -140,7 +160,8 @@ public struct AdaptiveCopyModel: Codable, Sendable, Equatable {
 
         var deviations: [AdaptiveFeatureDeviation] = []
         for (key, value) in features {
-            guard let statistic = statistics[key], statistic.count >= Self.minimumTrainingSamples else {
+            guard let statistic = statistics[key],
+                  statistic.count >= Self.minimumOutlierScreeningSamples else {
                 continue
             }
             let scale = max(statistic.standardDeviation, Self.minimumScale(for: key))
@@ -166,7 +187,7 @@ public struct AdaptiveCopyModel: Codable, Sendable, Equatable {
     }
 
     private func winsorized(_ value: Double, using statistic: RunningStatistic) -> Double {
-        guard statistic.count >= Self.minimumTrainingSamples else { return value }
+        guard statistic.count >= Self.minimumOutlierScreeningSamples else { return value }
         let scale = max(statistic.standardDeviation, 0.000_1)
         return min(max(value, statistic.mean - (4 * scale)), statistic.mean + (4 * scale))
     }
@@ -200,6 +221,34 @@ public struct AdaptiveCopyModel: Codable, Sendable, Equatable {
             $0.lowercased().hasPrefix("http://") || $0.lowercased().hasPrefix("https://")
         }.count
     }
+
+    fileprivate var hasValidPersistentState: Bool {
+        guard schemaVersion == Self.currentSchemaVersion,
+              sampleCount >= 0,
+              sampleCount <= 1_000_000,
+              statistics.count <= Self.expectedFeatureKeys.count,
+              Set(statistics.keys).isSubset(of: Self.expectedFeatureKeys) else {
+            return false
+        }
+        if sampleCount == 0 { return statistics.isEmpty }
+        return statistics.count == Self.expectedFeatureKeys.count
+            && statistics.values.allSatisfy {
+                $0.count == sampleCount && $0.hasValidPersistentState
+            }
+    }
+
+    private static let expectedFeatureKeys: Set<String> = [
+        "length",
+        "average word length",
+        "lexical diversity",
+        "sentence cadence",
+        "uppercase ratio",
+        "digit ratio",
+        "punctuation ratio",
+        "line-break ratio",
+        "non-ASCII ratio",
+        "URL density"
+    ]
 }
 
 private struct RunningStatistic: Codable, Sendable, Equatable {
@@ -219,6 +268,46 @@ private struct RunningStatistic: Codable, Sendable, Equatable {
         let nextDelta = value - mean
         squaredDifferenceSum += delta * nextDelta
     }
+
+    var hasValidPersistentState: Bool {
+        count >= 0
+            && mean.isFinite
+            && squaredDifferenceSum.isFinite
+            && squaredDifferenceSum >= 0
+    }
+}
+
+public enum AdaptiveCopyModelStoreError: Error, LocalizedError, Equatable {
+    case invalidFileType
+    case fileTooLarge(maximumBytes: Int)
+    case invalidModel
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidFileType:
+            "The Personal Baseline file is not a regular file."
+        case .fileTooLarge(let maximumBytes):
+            "The Personal Baseline file exceeds the \(maximumBytes)-byte safety limit."
+        case .invalidModel:
+            "The Personal Baseline file contains invalid aggregate state."
+        }
+    }
+}
+
+/// Deterministic findings and statistical outliers are never admitted into
+/// the baseline. This prevents a suspicious copy from teaching the detector
+/// that the suspicious structure is normal.
+public enum AdaptiveCopyLearningPolicy {
+    public static func allowsLearning(from analysis: ClipboardProtectionAnalysis) -> Bool {
+        analysis.limitation == nil
+            && !analysis.containsHiddenUnicode
+            && !analysis.containsCodeRisk
+            && !analysis.containsBinaryContent
+            && !analysis.containsTrackedLinks
+            && !analysis.containsOpaqueIdentifiers
+            && !analysis.containsPotentialScam
+            && !analysis.containsRecentPattern
+    }
 }
 
 public enum AdaptiveCopyModelStore {
@@ -226,10 +315,31 @@ public enum AdaptiveCopyModelStore {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return AdaptiveCopyModel()
         }
-        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true else {
+            throw AdaptiveCopyModelStoreError.invalidFileType
+        }
+        guard (values.fileSize ?? 0) <= TextAnalysisBudget.maximumAdaptiveModelFileBytes else {
+            throw AdaptiveCopyModelStoreError.fileTooLarge(
+                maximumBytes: TextAnalysisBudget.maximumAdaptiveModelFileBytes
+            )
+        }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let data = try handle.read(
+            upToCount: TextAnalysisBudget.maximumAdaptiveModelFileBytes + 1
+        ) ?? Data()
+        guard data.count <= TextAnalysisBudget.maximumAdaptiveModelFileBytes else {
+            throw AdaptiveCopyModelStoreError.fileTooLarge(
+                maximumBytes: TextAnalysisBudget.maximumAdaptiveModelFileBytes
+            )
+        }
         let model = try JSONDecoder().decode(AdaptiveCopyModel.self, from: data)
         guard model.schemaVersion == AdaptiveCopyModel.currentSchemaVersion else {
             return AdaptiveCopyModel()
+        }
+        guard model.hasValidPersistentState else {
+            throw AdaptiveCopyModelStoreError.invalidModel
         }
         return model
     }
@@ -241,6 +351,15 @@ public enum AdaptiveCopyModelStore {
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(model).write(to: url, options: [.atomic])
+        guard model.hasValidPersistentState else {
+            throw AdaptiveCopyModelStoreError.invalidModel
+        }
+        let data = try encoder.encode(model)
+        guard data.count <= TextAnalysisBudget.maximumAdaptiveModelFileBytes else {
+            throw AdaptiveCopyModelStoreError.fileTooLarge(
+                maximumBytes: TextAnalysisBudget.maximumAdaptiveModelFileBytes
+            )
+        }
+        try data.write(to: url, options: [.atomic])
     }
 }

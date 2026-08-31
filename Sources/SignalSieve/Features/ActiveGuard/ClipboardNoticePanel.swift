@@ -4,6 +4,7 @@ import SignalSieveCore
 import SwiftUI
 
 enum ClipboardWarningKind: String, CaseIterable, Hashable {
+    case analysisLimit
     case hiddenUnicode
     case unsafeCode
     case binaryContent
@@ -16,6 +17,7 @@ enum ClipboardWarningKind: String, CaseIterable, Hashable {
 
     var label: String {
         switch self {
+        case .analysisLimit: "Analysis safety limit"
         case .hiddenUnicode: "Hidden Unicode"
         case .unsafeCode: "Code risks"
         case .binaryContent: "Binary or encoded data"
@@ -46,6 +48,7 @@ struct ClipboardNotice: Identifiable {
     let identifierAnalysis: OpaqueIdentifierAnalysis
     let scamAnalysis: ScamAttemptAnalysis
     let adaptiveAnalysis: AdaptiveCopyAnalysis
+    let analysisLimitation: TextAnalysisLimitation?
     let clipboardContentKinds: [ClipboardContentKind]
     let pasteboardChangeCount: Int
     let automaticCleaningAudit: ClipboardAutomaticCleaningAudit?
@@ -63,6 +66,7 @@ struct ClipboardNotice: Identifiable {
             || automaticCleaningAudit?.originalPriority == .high {
             return .high
         }
+        if analysisLimitation != nil { return .elevated }
         return detectedPriority
     }
 
@@ -74,6 +78,7 @@ struct ClipboardNotice: Identifiable {
 
     var warningKinds: Set<ClipboardWarningKind> {
         var kinds: Set<ClipboardWarningKind> = []
+        if analysisLimitation != nil { kinds.insert(.analysisLimit) }
         if hiddenUnicodeCount > 0 { kinds.insert(.hiddenUnicode) }
         if codeRiskCount > 0 { kinds.insert(.unsafeCode) }
         if binaryKind != nil { kinds.insert(.binaryContent) }
@@ -110,6 +115,7 @@ struct ClipboardNotice: Identifiable {
             identifierAnalysis: identifierAnalysis,
             scamAnalysis: scamAnalysis,
             adaptiveAnalysis: adaptiveAnalysis,
+            analysisLimitation: analysisLimitation,
             clipboardContentKinds: clipboardContentKinds,
             pasteboardChangeCount: pasteboardChangeCount,
             automaticCleaningAudit: audit,
@@ -367,6 +373,19 @@ private struct ClipboardNoticeView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
+                if let limitation = notice.analysisLimitation {
+                    warningCard(
+                        kind: .analysisLimit,
+                        icon: "gauge.with.dots.needle.67percent",
+                        color: .orange,
+                        title: localized("Clipboard analysis stopped at its safety limit"),
+                        detail: formatted(
+                            "%d UTF-8 bytes exceeded the %d-byte maximum. SignalSieve did not inspect, learn from, or automatically rewrite this copy, so no safety verdict was produced.",
+                            limitation.observedUTF8Bytes,
+                            limitation.maximumUTF8Bytes
+                        )
+                    )
+                }
                 if notice.codeRiskCount > 0 {
                     warningCard(
                         kind: .unsafeCode,
@@ -622,6 +641,9 @@ private struct ClipboardNoticeView: View {
         if notice.automaticCleaningAudit?.receipt.verdict == .riskRemainsDoNotShare,
            notice.warningKinds.isEmpty {
             return localized("Automatic cleaning result quarantined")
+        }
+        if notice.analysisLimitation != nil {
+            return localized("Clipboard text exceeded the analysis safety limit")
         }
         if notice.hiddenUnicodeCount > 0 {
             return localized("Hidden Unicode detected in copied text")

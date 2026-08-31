@@ -8,6 +8,7 @@ public enum ClipboardAlertPriority: Sendable, Equatable {
 }
 
 public struct ClipboardProtectionAnalysis: Sendable, Equatable {
+    public let limitation: TextAnalysisLimitation?
     public let inspection: TextInspection
     public let covertChannelReport: CovertTextChannelReport
     public let codeAnalysis: CodeGuardAnalysis
@@ -20,6 +21,7 @@ public struct ClipboardProtectionAnalysis: Sendable, Equatable {
     public let addedPatternSample: Bool
 
     public init(
+        limitation: TextAnalysisLimitation? = nil,
         inspection: TextInspection,
         covertChannelReport: CovertTextChannelReport,
         codeAnalysis: CodeGuardAnalysis,
@@ -31,6 +33,7 @@ public struct ClipboardProtectionAnalysis: Sendable, Equatable {
         updatedPatternTexts: [String],
         addedPatternSample: Bool
     ) {
+        self.limitation = limitation
         self.inspection = inspection
         self.covertChannelReport = covertChannelReport
         self.codeAnalysis = codeAnalysis
@@ -66,7 +69,8 @@ public struct ClipboardProtectionAnalysis: Sendable, Equatable {
     }
 
     public var cleanReceiptAlertCount: Int {
-        hiddenTextFindingCount
+        (limitation == nil ? 0 : 1)
+            + hiddenTextFindingCount
             + codeAnalysis.findings.count
             + (binaryAnalysis.isDetected ? 1 : 0)
             + linkCleaning.linksFlagged
@@ -75,12 +79,35 @@ public struct ClipboardProtectionAnalysis: Sendable, Equatable {
     }
 
     public var cleanReceiptPriority: ClipboardAlertPriority {
-        ClipboardProtectionAnalyzer.alertPriority(
+        if limitation != nil { return .elevated }
+        return ClipboardProtectionAnalyzer.alertPriority(
             hiddenUnicodeRisk: hiddenTextRiskLevel,
             codeRisk: codeAnalysis.highestRiskLevel,
             scamThreat: scamAnalysis.isPotentialScam ? scamAnalysis.threatLevel : nil,
             hasElevatedSignal: linkCleaning.hasTrackingRisk
         )
+    }
+}
+
+public enum PatternSampleRejectionReason: Sendable, Equatable {
+    case emptyOrTooShort
+    case duplicate
+    case inputTooLarge
+}
+
+public struct PatternSampleAppendResult: Sendable, Equatable {
+    public let texts: [String]
+    public let added: Bool
+    public let rejectionReason: PatternSampleRejectionReason?
+
+    public init(
+        texts: [String],
+        added: Bool,
+        rejectionReason: PatternSampleRejectionReason?
+    ) {
+        self.texts = texts
+        self.added = added
+        self.rejectionReason = rejectionReason
     }
 }
 
@@ -114,6 +141,24 @@ public enum ClipboardProtectionAnalyzer {
         recentPatternTexts: [String],
         customRules: [CustomURLRule] = []
     ) -> ClipboardProtectionAnalysis {
+        if let limitation = TextAnalysisBudget.limitation(for: text) {
+            let boundedTexts = boundedPatternTexts(recentPatternTexts)
+            return ClipboardProtectionAnalysis(
+                limitation: limitation,
+                inspection: HiddenTextAnalyzer.inspect(""),
+                covertChannelReport: CovertTextChannelAnalyzer.analyze(""),
+                codeAnalysis: CodeGuardAnalyzer.analyze(""),
+                binaryAnalysis: BinaryContentDetector.analyze(""),
+                linkCleaning: URLTrackerCleaner.cleanLinks(in: "", customRules: customRules),
+                identifierAnalysis: OpaqueIdentifierAnalyzer.analyze(""),
+                scamAnalysis: ScamAttemptDetector.analyze(""),
+                recentPatternReport: PatternAnalyzer.analyze(
+                    Array(boundedTexts.suffix(alertPatternWindow))
+                ),
+                updatedPatternTexts: boundedTexts,
+                addedPatternSample: false
+            )
+        }
         let sampleUpdate = appendingPatternSample(text, to: recentPatternTexts)
         let recentWindow = Array(sampleUpdate.texts.suffix(alertPatternWindow))
         let safelyCleanedText = TextCleaner.clean(text, mode: .safe).text
@@ -138,17 +183,58 @@ public enum ClipboardProtectionAnalyzer {
     public static func appendingPatternSample(
         _ text: String,
         to existingTexts: [String]
-    ) -> (texts: [String], added: Bool) {
+    ) -> PatternSampleAppendResult {
+        var texts = boundedPatternTexts(existingTexts)
+        guard TextAnalysisBudget.limitation(
+            for: text,
+            maximumUTF8Bytes: TextAnalysisBudget.maximumPatternSampleUTF8Bytes
+        ) == nil else {
+            return PatternSampleAppendResult(
+                texts: texts,
+                added: false,
+                rejectionReason: .inputTooLarge
+            )
+        }
         let sample = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard sample.count >= minimumPatternSampleLength, existingTexts.last != sample else {
-            return (existingTexts, false)
+        guard sample.count >= minimumPatternSampleLength else {
+            return PatternSampleAppendResult(
+                texts: texts,
+                added: false,
+                rejectionReason: .emptyOrTooShort
+            )
+        }
+        guard texts.last != sample else {
+            return PatternSampleAppendResult(
+                texts: texts,
+                added: false,
+                rejectionReason: .duplicate
+            )
         }
 
-        var texts = existingTexts
         texts.append(sample)
-        if texts.count > maximumPatternSamples {
-            texts.removeFirst(texts.count - maximumPatternSamples)
+        texts = boundedPatternTexts(texts)
+        return PatternSampleAppendResult(
+            texts: texts,
+            added: true,
+            rejectionReason: nil
+        )
+    }
+
+    private static func boundedPatternTexts(_ existingTexts: [String]) -> [String] {
+        var texts = Array(existingTexts.suffix(maximumPatternSamples)).filter {
+            TextAnalysisBudget.limitation(
+                for: $0,
+                maximumUTF8Bytes: TextAnalysisBudget.maximumPatternSampleUTF8Bytes
+            ) == nil
         }
-        return (texts, true)
+        var totalBytes = texts.reduce(0) { partial, text in
+            partial + text.utf8.count
+        }
+        while totalBytes > TextAnalysisBudget.maximumPatternMemoryUTF8Bytes,
+              let first = texts.first {
+            totalBytes -= first.utf8.count
+            texts.removeFirst()
+        }
+        return texts
     }
 }

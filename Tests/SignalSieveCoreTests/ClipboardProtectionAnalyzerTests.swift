@@ -166,3 +166,47 @@ func boundsClipboardMemory() {
     #expect(final.first == samples[5])
     #expect(final.last == samples[14])
 }
+
+@Test("Active protection refuses oversized text without returning a green verdict")
+func refusesOversizedClipboardAnalysis() {
+    let oversized = String(
+        repeating: "a",
+        count: TextAnalysisBudget.maximumInteractiveUTF8Bytes + 1
+    )
+    let analysis = ClipboardProtectionAnalyzer.analyze(
+        oversized,
+        recentPatternTexts: []
+    )
+
+    #expect(analysis.limitation?.observedUTF8Bytes == oversized.utf8.count)
+    #expect(analysis.cleanReceiptPriority == .elevated)
+    #expect(analysis.cleanReceiptAlertCount == 1)
+    #expect(!analysis.addedPatternSample)
+    #expect(analysis.inspection.findings.isEmpty)
+}
+
+@Test("Pattern Memory rejects oversized samples and caps total retained bytes")
+func boundsPatternMemoryBytes() {
+    let oversized = String(
+        repeating: "x",
+        count: TextAnalysisBudget.maximumPatternSampleUTF8Bytes + 1
+    )
+    let rejected = ClipboardProtectionAnalyzer.appendingPatternSample(
+        oversized,
+        to: []
+    )
+    #expect(!rejected.added)
+    #expect(rejected.rejectionReason == .inputTooLarge)
+
+    var memory: [String] = []
+    for index in 0..<6 {
+        let sample = "sample-\(index)-" + String(repeating: "z", count: 60 * 1_024)
+        memory = ClipboardProtectionAnalyzer.appendingPatternSample(
+            sample,
+            to: memory
+        ).texts
+    }
+    #expect(memory.count == 4)
+    #expect(memory.reduce(0) { $0 + $1.utf8.count }
+        <= TextAnalysisBudget.maximumPatternMemoryUTF8Bytes)
+}
